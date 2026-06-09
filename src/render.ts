@@ -25,7 +25,7 @@ import { input } from "./input/input"
 /** 
  * * Primitive class 
  **/
-class primitive
+export class primitive
 {
   public scale2 : vec3;
   public position : vec3;
@@ -33,7 +33,7 @@ class primitive
   public rotation : vec4;
   public opacity : number;
   public color : vec4;
-  public index: number;
+  public index: number = 0;
 
   /**
    * @info Primitive constructor
@@ -73,20 +73,22 @@ class primitive
  **/
 class render extends core
 {
-  private controls: control | undefined = undefined;
-  private commandEncoder: GPUCommandEncoder | null = null;
-  private passEncoder: GPURenderPassEncoder | null = null;
-  private computePassEncoder: GPUComputePassEncoder | null = null;
-  private renderTexture: GPUTexture | null = null;
-  private renderTextureView: GPUTextureView | null = null;
+  private controls!: control;
+  private commandEncoder!: GPUCommandEncoder | null;
+  private passEncoder!: GPURenderPassEncoder | null;
+  private computePassEncoder!: GPUComputePassEncoder | null;
+  private renderTexture!: GPUTexture | null;
+  private renderTextureView!: GPUTextureView | null;
 
   private workGroupSize = 64;
-  private pipeline: GPUComputePipeline | null = null;
-  private bindGroup: GPUBindGroup | null = null;
-  private inputBuffer: buffer | null = null;
-  private outputBuffer: buffer | null = null;
-  private cameraBuffer: buffer | null = null;
-  private cameraData: Float32Array | null = null;
+  private pipeline!: GPUComputePipeline;
+  private bindGroup!: GPUBindGroup;
+  private inputBuffer!: buffer;
+  private outputBuffer!: buffer;
+  private tileBuffer!: buffer;
+  private counterBuffer!: buffer;
+  private cameraBuffer!: buffer;
+  private cameraData!: Float32Array;
 
   private primitives: primitive[] = [];
 
@@ -109,6 +111,8 @@ class render extends core
     this.inputBuffer = new buffer(this);
     this.outputBuffer = new buffer(this);
     this.cameraBuffer = new buffer(this);
+    this.tileBuffer = new buffer(this);
+    this.counterBuffer = new buffer(this);
 
     this.inputBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -119,12 +123,22 @@ class render extends core
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
       size: 1024,
     });
+
     this.cameraBuffer.create({
       size: 4 * (64 + 64 + 64 + 16 * 5),
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       type: "uniform",
     });
 
+    this.tileBuffer.create({
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      size: Math.ceil(this.canvas.width / 16) * Math.ceil(this.canvas.height / 16) * 16,
+    })
+
+    this.counterBuffer.create({
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      size: 4,
+    })
     const shaderModule = await this.loadShaderModule("src/shaders/compute/comp.wgsl");
     
     this.pipeline = this.device.createComputePipeline({
@@ -146,6 +160,14 @@ class render extends core
         { 
           binding: 2, 
           resource: { buffer: this.outputBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: { buffer: this.tileBuffer.buffer } 
+        },
+        { 
+          binding: 4, 
+          resource: { buffer: this.counterBuffer.buffer } 
         }
       ]
     });
@@ -156,7 +178,7 @@ class render extends core
    * @param url : shader url address
    * @returns None.
    */
-  private async loadShaderModule(url) {
+  private async loadShaderModule(url: string) {
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Failed to fetch shader at ${url}. Status: ${response.status}`);
@@ -217,16 +239,15 @@ class render extends core
    * @returns None.
    */
   public draw(prim: primitive) {
-
-
+    this.primitives.push(prim);
   } /** End of 'draw' function */
 
   /**
    * @info Draw low level function
    * @returns None.
    */
-  private drawLow() {
-    if (this.primitives.length == 0) 
+  private async drawLow() {
+    if (this.primitives.length == 0 || !this.commandEncoder) 
       return;
     
     if (!this.cameraData) 
@@ -242,7 +263,9 @@ class render extends core
     this.cameraData.set([this.controls.cam.right.x, this.controls.cam.right.y, this.controls.cam.right.z, this.controls.cam.wp], offset); offset += 4;
     this.cameraData.set([this.controls.cam.up.x, this.controls.cam.up.y, this.controls.cam.up.z, this.controls.cam.hp], offset);
       
-    this.cameraBuffer.update(this.cameraData);  
+    await this.cameraBuffer.update(this.cameraData);
+
+    await this.counterBuffer.updateInteger(new Uint32Array([0]));
 
     // Collect data
     const gaussians = this.primitives.map(p => ({
@@ -286,11 +309,13 @@ class render extends core
     }
     const workgroupCount = gaussians.length / this.workGroupSize;
     
-    this.inputBuffer.updateArray(arrayBuffer);
+    await this.inputBuffer.updateArray(arrayBuffer);
     
     if (this.inputBuffer.isSizeChanged)
     {
+      await this.outputBuffer.resize(gaussians.length * 48);
       this.inputBuffer.isSizeChanged = false;
+      this.outputBuffer.isSizeChanged = false;
 
       this.bindGroup = this.device.createBindGroup({
         layout: this.pipeline.getBindGroupLayout(0),
@@ -306,12 +331,20 @@ class render extends core
           { 
             binding: 2, 
             resource: { buffer: this.outputBuffer.buffer } 
+          },
+          { 
+            binding: 3, 
+            resource: { buffer: this.tileBuffer.buffer } 
+          },
+          { 
+            binding: 4, 
+            resource: { buffer: this.counterBuffer.buffer } 
           }
         ]
       });
     }
       
-    this.computePassEncoder = this.commandEncoder.beginComputePass();
+    this.computePassEncoder = this.commandEncoder.beginComputePass({});
     this.computePassEncoder.setPipeline(this.pipeline);
     this.computePassEncoder.setBindGroup(0, this.bindGroup);
     this.computePassEncoder.dispatchWorkgroups(workgroupCount, 1, 1);
@@ -323,16 +356,17 @@ class render extends core
    * @param None. 
    * @returns None.
    */
-  public end() {
+  public async end() {
     if (!this.commandEncoder) return;
 
-    this.drawLow();
+    await this.drawLow();
     
     this.queue.submit([this.commandEncoder.finish()]);
     
     this.passEncoder = null;
     this.commandEncoder = null;
     input.clear();
+    this.primitives = [];
   } /** End of 'end' function */
 } /** End of 'render' class */
 

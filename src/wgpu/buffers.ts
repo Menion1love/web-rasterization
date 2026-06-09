@@ -39,7 +39,7 @@ class buffer {
   } /** End of 'constructor' function */
 
   /** #public parameters */
-  public buffer: GPUBuffer = null;
+  public buffer!: GPUBuffer;
   public bufferType!: GPUBufferBindingType;
   public isSizeChanged: boolean = false;
 
