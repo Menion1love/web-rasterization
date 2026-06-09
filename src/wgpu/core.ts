@@ -13,9 +13,11 @@
  *  Computer Graphics Support Group of 30 Phys-Math Lyceum
  */
 
+/** 
+ * * Core class 
+ **/
 class core 
 {
-  /** #public parameters */
   public adapter!: GPUAdapter; // Adapter
   public device!: GPUDevice; // Device
   public queue!: GPUQueue; // Queue
@@ -26,6 +28,7 @@ class core
   /**
    * @info Initialize context function
    * @param Canvas elemant id
+   * @returns None.
    */
   public async coreInit(id: Element) {
     this.canvas = id as HTMLCanvasElement;
