@@ -20,6 +20,7 @@ import { core } from './core.ts'
 interface buffer_descriptor {
   usage: GPUBufferUsageFlags;
   size: number;
+  label?: string;
   type?: GPUBufferBindingType;
   data?: Float32Array;
 } /** End of 'buffer_descriptor' interface */
@@ -55,6 +56,7 @@ class buffer {
         size: bufferParams.size,
         usage: bufferParams.usage,
         mappedAtCreation: true,
+        label: bufferParams.label
       };
       this.buffer = this.render.device.createBuffer(this.bufferDesriptor);
       new Float32Array(this.buffer.getMappedRange()).set(bufferParams.data);
@@ -64,7 +66,8 @@ class buffer {
       this.bufferDesriptor = {
         size: bufferParams.size,
         usage: bufferParams.usage,
-      };
+        label: bufferParams.label
+      };  
       this.buffer = this.render.device.createBuffer(this.bufferDesriptor);
     }
   } /** End of 'create' function */
@@ -79,7 +82,7 @@ class buffer {
     
     await this.destroy();
 
-    this.bufferDesriptor.size = Math.max(newSize, this.bufferDesriptor.size * 2);
+    this.bufferDesriptor.size = newSize;
     this.buffer = this.render.device.createBuffer(this.bufferDesriptor);
     this.isSizeChanged = true;
   } /** End of 'resize' function */

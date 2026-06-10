@@ -26,13 +26,13 @@ struct rasterData {
   cov_2d: vec3<f32>,
   depth: f32,
   index: u32,
-  padding: f32,
+  dummy: f32,
 }
 
 struct sortKey {
   key: u32,
   index: u32,
-  padding: vec2<f32>,
+  padding: vec2<u32>,
 }
 
 @group(0) @binding(0) var<uniform> camera : camData;
@@ -91,11 +91,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let t = camera.view * vec4<f32>(gs.position, 1.0);
   var out: rasterData;
 
-  if (t.z < 0.2) {
+  if (t.z < 0.05) {
     return;
   }
 
   out.depth = t.z;
+
   let half_w = f32(camera.locW.w) * 0.5;
   let half_h = f32(camera.atH.w) * 0.5;
 
@@ -110,9 +111,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let cov_3d = compute_covariance(vec3<f32>(gs.scale), gs.rotation);
 
   let J = mat3x3<f32>(
-    vec3<f32>(fx / t.z, 0, -(t.x * fx) / tz2),
-    vec3<f32>(0, fy / t.z, -(t.y * fy) / tz2),
-    vec3<f32>(0, 0, 1),
+    vec3<f32>(fx / t.z, 0, 0),
+    vec3<f32>(0, fy / t.z, 0),
+    vec3<f32>(-(t.x * fx) / tz2, -(t.y * fy) / tz2, 1),
   );
 
   let w = mat3x3<f32>(
@@ -121,10 +122,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     camera.view[2].xyz
   );
 
-  let cov_2d = J * w * cov_3d * transpose(w) * transpose(J);
+  let cov_cam = w * cov_3d * transpose(w);
+  let cov_2d = J * cov_cam * transpose(J);
 
   let fil = 0.3; 
-  out.cov_2d = vec3<f32>(cov_2d[0][1] + fil, cov_2d[0][0], cov_2d[1][0] + fil);
+  out.cov_2d = vec3<f32>(cov_2d[0][0] + fil, cov_2d[0][1], cov_2d[1][1] + fil);
   out.opacity = gs.opacity;
   out.index = gs.index;
   out.color = gs.color.xyz;
@@ -150,18 +152,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let min_tile = vec2<i32>(max(vec2<f32>(0.0), floor(min_pixel / 16.0)));
   let max_tile = vec2<i32>(min(vec2<f32>(f32(grid_width - 1), f32(grid_height - 1)), floor(max_pixel / 16.0)));
 
-  let bits_of_depth = bitcast<u32>(out.depth);
+  let depth_int = u32(clamp(out.depth * 1000.0, 0.0, 65535.0));
 
   for (var ty = min_tile.y; ty <= max_tile.y; ty++) {
     for (var tx = min_tile.x; tx <= max_tile.x; tx++) {
       let tile_id = u32(ty * i32(grid_width) + tx);
   
-      let key = (tile_id << 16u) | (bits_of_depth >> 16u); 
+      let key = (tile_id << 16u) | depth_int; 
   
       let global_key_idx = atomicAdd(&global_keys_counter, 1u);
   
       keysBuffer[global_key_idx].key = key;
-      keysBuffer[global_key_idx].index = gs.index; 
+      keysBuffer[global_key_idx].index = idx; 
     }
   }
 

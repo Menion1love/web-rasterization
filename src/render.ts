@@ -17,7 +17,6 @@ import { core } from "./wgpu/core";
 import { buffer } from "./wgpu/buffers"
 import { vec3 } from "./mth/mth_vec3"
 import { vec4 } from "./mth/mth_vec4"
-import { mat4 } from "./mth/mth_matr"
 import { control } from "./input/control"
 import { timer } from "./input/timer"
 import { input } from "./input/input"
@@ -27,7 +26,6 @@ import { input } from "./input/input"
  **/
 export class primitive
 {
-  public scale2 : vec3;
   public position : vec3;
   public scale : vec3;
   public rotation : vec4;
@@ -50,22 +48,7 @@ export class primitive
     this.rotation = rot;
     this.opacity = opac;
     this.color = col;
-    this.scale2 = new vec3(scl.x * scl.x, scl.y * scl.y, scl.z * scl.z); 
   } /** End of 'primitive' constructor */
-
-  /**
-   * @info Compute covariance matrix
-   * @param None.
-   * @returns covariance matrix.
-   */
-  public computeCovariance(): mat4
-  {
-    let s = mat4.scale(this.scale2);
-    let r = this.rotation.q2m();
-    let rt = r.transpose();
-
-    return r.multiply(s.multiply(rt));
-  } /** End of 'computeCovariance' function */
 } /** End of 'primitive' class */
 
 /** 
@@ -81,8 +64,12 @@ class render extends core
   private renderTextureView!: GPUTextureView | null;
 
   private workGroupSize = 64;
-  private pipeline!: GPUComputePipeline;
+  private computePipeline!: GPUComputePipeline;
+  private rasterPipeline!: GPUComputePipeline;
+  private displayPipeline!: GPURenderPipeline;
   private bindGroup!: GPUBindGroup;
+  private rasterBindGroup!: GPUBindGroup;
+  private displayBindGroup!: GPUBindGroup;
   private inputBuffer!: buffer;
   private outputBuffer!: buffer;
   private tileBuffer!: buffer;
@@ -104,7 +91,7 @@ class render extends core
     this.renderTexture = this.device.createTexture({
       size: [this.canvas.width, this.canvas.height], 
       format: 'rgba8unorm', 
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE_BINDING  
     });
     this.renderTextureView = this.renderTexture.createView();
     
@@ -116,38 +103,49 @@ class render extends core
 
     this.inputBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      size: 1024,
+      size: 64,
+      label: "input",
     });
 
     this.outputBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-      size: 1024,
+      size: 64,
+      label: "output",
     });
 
     this.cameraBuffer.create({
-      size: 4 * (64 + 64 + 64 + 16 * 5),
+      size: (64 + 64 + 64 + 16 * 5) * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       type: "uniform",
+      label: "camera",
     });
-
+    
+    let tileSizex = Math.ceil(this.canvas.width / 16);
+    let tileSizey = Math.ceil(this.canvas.height / 16);
+    
     this.tileBuffer.create({
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-      size: Math.ceil(this.canvas.width / 16) * Math.ceil(this.canvas.height / 16) * 16,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      size: tileSizex * tileSizey * 4,
+      label: "tile",
     })
+    console.log(tileSizex * tileSizey);
+
+    await this.tileBuffer.updateInteger(new Uint32Array(new Array(tileSizex * tileSizey * 4).fill(0)));
 
     this.counterBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       size: 4,
     })
+
     const shaderModule = await this.loadShaderModule("src/shaders/compute/comp.wgsl");
     
-    this.pipeline = this.device.createComputePipeline({
+    this.computePipeline = this.device.createComputePipeline({
       layout: 'auto',
       compute: { module: shaderModule, entryPoint: 'main' }
     });
 
     this.bindGroup = this.device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(0),
+      layout: this.computePipeline.getBindGroupLayout(0),
       entries: [
         { 
           binding: 0,
@@ -168,6 +166,74 @@ class render extends core
         { 
           binding: 4, 
           resource: { buffer: this.counterBuffer.buffer } 
+        }
+      ]
+    });
+
+    const rasterShaderModule = await this.loadShaderModule("src/shaders/compute/raster.wgsl");
+
+    this.rasterPipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: rasterShaderModule, entryPoint: 'main' }
+    });
+
+    this.rasterBindGroup = this.device.createBindGroup({
+      layout: this.rasterPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.cameraBuffer.buffer }
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.outputBuffer.buffer } 
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.tileBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: this.renderTextureView 
+        },
+      ]
+    });
+
+    const displayShaderModule = await this.loadShaderModule("src/shaders/display/display.wgsl");
+
+    const sampler = this.device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+    });
+
+    this.displayPipeline = this.device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module: displayShaderModule,
+        entryPoint: 'vs_main',
+      },
+      fragment: {
+        module: displayShaderModule,
+        entryPoint: 'fs_main',
+        targets: [{
+          format: this.context.getCurrentTexture().format,
+        }],
+      },
+      primitive: {
+        topology: 'triangle-list',
+      },
+    });
+
+    this.displayBindGroup = this.device.createBindGroup({
+      layout: this.displayPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: this.renderTextureView
+        },
+        {
+          binding: 1,
+          resource: sampler
         }
       ]
     });
@@ -218,17 +284,7 @@ class render extends core
    * @returns None.
    */
   public start() {
-    const renderPassDescriptor: GPURenderPassDescriptor = {
-      colorAttachments: [{
-        view: this.context.getCurrentTexture().createView(), 
-        clearValue: { r: 0.8, g: 0.5, b: 0.5, a: 1.0 },
-        loadOp: 'clear',
-        storeOp: 'store'
-      }],
-    };
-
     this.commandEncoder = this.device.createCommandEncoder();
-    //this.passEncoder = this.commandEncoder.beginRenderPass(renderPassDescriptor);
     this.controls.response();
     timer.response();
   } /** End of 'start' function */
@@ -307,18 +363,18 @@ class render extends core
       
       uintView[offset + 13] = g.index;
     }
-    const workgroupCount = gaussians.length / this.workGroupSize;
+    const workgroupCount = Math.floor((gaussians.length + 63) / this.workGroupSize);
     
     await this.inputBuffer.updateArray(arrayBuffer);
     
     if (this.inputBuffer.isSizeChanged)
     {
-      await this.outputBuffer.resize(gaussians.length * 48);
+      await this.outputBuffer.resize(gaussians.length * 16 * 4);
       this.inputBuffer.isSizeChanged = false;
       this.outputBuffer.isSizeChanged = false;
 
       this.bindGroup = this.device.createBindGroup({
-        layout: this.pipeline.getBindGroupLayout(0),
+        layout: this.computePipeline.getBindGroupLayout(0),
         entries: [
           { 
             binding: 0,
@@ -342,12 +398,39 @@ class render extends core
           }
         ]
       });
+      this.rasterBindGroup = this.device.createBindGroup({
+        layout: this.rasterPipeline.getBindGroupLayout(0),
+        entries: [
+          { 
+            binding: 0,
+            resource: { buffer: this.cameraBuffer.buffer }
+          },
+          { 
+            binding: 1, 
+            resource: { buffer: this.outputBuffer.buffer } 
+          },
+          { 
+            binding: 2, 
+            resource: { buffer: this.tileBuffer.buffer } 
+          },
+          { 
+            binding: 3, 
+            resource: this.renderTextureView 
+          },
+        ]
+      });
     }
+    let tileSizex = Math.ceil(this.canvas.width / 16);
+    let tileSizey = Math.ceil(this.canvas.height / 16);
+    
       
     this.computePassEncoder = this.commandEncoder.beginComputePass({});
-    this.computePassEncoder.setPipeline(this.pipeline);
+    this.computePassEncoder.setPipeline(this.computePipeline);
     this.computePassEncoder.setBindGroup(0, this.bindGroup);
     this.computePassEncoder.dispatchWorkgroups(workgroupCount, 1, 1);
+    this.computePassEncoder.setPipeline(this.rasterPipeline);
+    this.computePassEncoder.setBindGroup(0, this.rasterBindGroup);
+    this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
     this.computePassEncoder.end();
   } /** End of 'drawLow' function */
 
@@ -360,7 +443,22 @@ class render extends core
     if (!this.commandEncoder) return;
 
     await this.drawLow();
-    
+
+    const renderPassDescriptor: GPURenderPassDescriptor = {
+      colorAttachments: [{
+        view: this.context.getCurrentTexture().createView(), 
+        clearValue: { r: 0.8, g: 0.5, b: 0.5, a: 1.0 },
+        loadOp: 'clear',
+        storeOp: 'store'
+      }],
+    };
+    this.passEncoder = this.commandEncoder.beginRenderPass(renderPassDescriptor);
+
+    this.passEncoder.setPipeline(this.displayPipeline);
+    this.passEncoder.setBindGroup(0, this.displayBindGroup);
+    this.passEncoder.draw(3);
+    this.passEncoder.end();
+
     this.queue.submit([this.commandEncoder.finish()]);
     
     this.passEncoder = null;
