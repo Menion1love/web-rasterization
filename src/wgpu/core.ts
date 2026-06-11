@@ -67,7 +67,6 @@ class core
       device: this.device,
       format: navigator.gpu.getPreferredCanvasFormat(),
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST, 
-
     });
     this.isinit = true;
 

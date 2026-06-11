@@ -29,17 +29,12 @@ struct rasterData {
   dummy: f32,
 }
 
-struct sortKey {
-  key: u32,
-  index: u32,
-  padding: vec2<u32>,
-}
-
 @group(0) @binding(0) var<uniform> camera : camData;
 @group(0) @binding(1) var<storage, read> inputData: array<gaussainData>;
 @group(0) @binding(2) var<storage, read_write> outputData: array<rasterData>;
-@group(0) @binding(3) var<storage, read_write> keysBuffer: array<sortKey>;
-@group(0) @binding(4) var<storage, read_write> global_keys_counter: atomic<u32>;
+@group(0) @binding(3) var<storage, read_write> keysBuffer: array<u32>;
+@group(0) @binding(4) var<storage, read_write> valuesBuffer: array<u32>;
+@group(0) @binding(5) var<storage, read_write> global_keys_counter: atomic<u32>;
 
 fn quaternion_to_matrix(q_input: vec4<f32>) -> mat3x3<f32> {
   let q = normalize(q_input);
@@ -91,7 +86,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let t = camera.view * vec4<f32>(gs.position, 1.0);
   var out: rasterData;
 
-  if (t.z < 0.05) {
+  if (t.z < 0.1) {
     return;
   }
 
@@ -111,9 +106,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let cov_3d = compute_covariance(vec3<f32>(gs.scale), gs.rotation);
 
   let J = mat3x3<f32>(
-    vec3<f32>(fx / t.z, 0, 0),
-    vec3<f32>(0, fy / t.z, 0),
-    vec3<f32>(-(t.x * fx) / tz2, -(t.y * fy) / tz2, 1),
+    vec3<f32>(fx / t.z, 0, -(t.x * fx) / tz2),
+    vec3<f32>(0, fy / t.z, -(t.y * fy) / tz2),
+    vec3<f32>(0, 0, 1),
   );
 
   let w = mat3x3<f32>(
@@ -139,9 +134,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let det = a * c - b * b;
 
   let mid = 0.5 * trace;
-  let term = sqrt(max(0.1, mid * mid - det));
+  let term = sqrt(max(0.01, mid * mid - det));
   let lambda_max = mid + term;
-  let radius = 3.0 * sqrt(lambda_max);
+  let radius = 3.0 * sqrt(max(0.0, lambda_max));
 
   let min_pixel = out.center_2d - vec2<f32>(radius);
   let max_pixel = out.center_2d + vec2<f32>(radius);
@@ -150,20 +145,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let grid_height = camera.atH.w / tile_size;
 
   let min_tile = vec2<i32>(max(vec2<f32>(0.0), floor(min_pixel / 16.0)));
-  let max_tile = vec2<i32>(min(vec2<f32>(f32(grid_width - 1), f32(grid_height - 1)), floor(max_pixel / 16.0)));
+  let max_tile = vec2<i32>(min(
+    vec2<f32>(grid_width - 1.0, grid_height - 1.0), 
+    ceil(max_pixel / 16.0) - vec2<f32>(1.0)
+  ));
 
-  let depth_int = u32(clamp(out.depth * 1000.0, 0.0, 65535.0));
+  let depth_bits = bitcast<u32>(out.depth);
 
   for (var ty = min_tile.y; ty <= max_tile.y; ty++) {
     for (var tx = min_tile.x; tx <= max_tile.x; tx++) {
       let tile_id = u32(ty * i32(grid_width) + tx);
   
-      let key = (tile_id << 16u) | depth_int; 
+      let key = (tile_id << 16u) | (depth_bits >> 16u); 
   
       let global_key_idx = atomicAdd(&global_keys_counter, 1u);
   
-      keysBuffer[global_key_idx].key = key;
-      keysBuffer[global_key_idx].index = idx; 
+      keysBuffer[global_key_idx] = key;
+      valuesBuffer[global_key_idx] = idx; 
     }
   }
 

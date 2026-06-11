@@ -20,6 +20,7 @@ import { vec4 } from "./mth/mth_vec4"
 import { control } from "./input/control"
 import { timer } from "./input/timer"
 import { input } from "./input/input"
+import { RadixSortKernel } from 'webgpu-radix-sort';
 
 /** 
  * * Primitive class 
@@ -63,16 +64,21 @@ class render extends core
   private renderTexture!: GPUTexture | null;
   private renderTextureView!: GPUTextureView | null;
 
+  private radixSortKernel!: RadixSortKernel;
   private workGroupSize = 64;
   private computePipeline!: GPUComputePipeline;
+  private tailPipeline!: GPUComputePipeline;
   private rasterPipeline!: GPUComputePipeline;
   private displayPipeline!: GPURenderPipeline;
   private bindGroup!: GPUBindGroup;
+  private tailBindGroup!: GPUBindGroup;
   private rasterBindGroup!: GPUBindGroup;
   private displayBindGroup!: GPUBindGroup;
   private inputBuffer!: buffer;
   private outputBuffer!: buffer;
-  private tileBuffer!: buffer;
+  private keysBuffer!: buffer;
+  private valuesBuffer!: buffer;
+  private tailBuffer!: buffer;
   private counterBuffer!: buffer;
   private cameraBuffer!: buffer;
   private cameraData!: Float32Array;
@@ -98,8 +104,10 @@ class render extends core
     this.inputBuffer = new buffer(this);
     this.outputBuffer = new buffer(this);
     this.cameraBuffer = new buffer(this);
-    this.tileBuffer = new buffer(this);
+    this.keysBuffer = new buffer(this);
     this.counterBuffer = new buffer(this);
+    this.valuesBuffer = new buffer(this);
+    this.tailBuffer = new buffer(this);
 
     this.inputBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -123,14 +131,23 @@ class render extends core
     let tileSizex = Math.ceil(this.canvas.width / 16);
     let tileSizey = Math.ceil(this.canvas.height / 16);
     
-    this.tileBuffer.create({
+    this.keysBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       size: tileSizex * tileSizey * 4,
-      label: "tile",
+      label: "keys",
     })
-    console.log(tileSizex * tileSizey);
 
-    await this.tileBuffer.updateInteger(new Uint32Array(new Array(tileSizex * tileSizey * 4).fill(0)));
+    this.valuesBuffer.create({
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      size: tileSizex * tileSizey * 4,
+      label: "values",
+    })
+
+    this.tailBuffer.create({
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      size: tileSizex * tileSizey * 8,
+      label: "tail",
+    })
 
     this.counterBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -161,12 +178,37 @@ class render extends core
         },
         { 
           binding: 3, 
-          resource: { buffer: this.tileBuffer.buffer } 
+          resource: { buffer: this.keysBuffer.buffer } 
         },
         { 
           binding: 4, 
+          resource: { buffer: this.valuesBuffer.buffer } 
+        },
+        { 
+          binding: 5, 
           resource: { buffer: this.counterBuffer.buffer } 
         }
+      ]
+    });
+
+    const tailShaderModule = await this.loadShaderModule("src/shaders/compute/tailer.wgsl");
+
+    this.tailPipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: tailShaderModule, entryPoint: 'main' }
+    });
+
+    this.tailBindGroup = this.device.createBindGroup({
+      layout: this.tailPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0, 
+          resource: { buffer: this.keysBuffer.buffer } 
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.tailBuffer.buffer }
+        },
       ]
     });
 
@@ -190,10 +232,18 @@ class render extends core
         },
         { 
           binding: 2, 
-          resource: { buffer: this.tileBuffer.buffer } 
+          resource: { buffer: this.keysBuffer.buffer } 
         },
         { 
           binding: 3, 
+          resource: { buffer: this.valuesBuffer.buffer } 
+        },
+        { 
+          binding: 4, 
+          resource: { buffer: this.tailBuffer.buffer } 
+        },
+        { 
+          binding: 5, 
           resource: this.renderTextureView 
         },
       ]
@@ -237,6 +287,17 @@ class render extends core
         }
       ]
     });
+
+    this.radixSortKernel = new RadixSortKernel({
+      device: this.device,
+      keys: this.keysBuffer.buffer,
+      values: this.valuesBuffer.buffer,
+      count: tileSizex * tileSizey,
+      check_order: false,
+      bit_count: 32,
+      workgroup_size: { x: 16, y: 16 },
+    })
+
   } /** End of 'constructor' function */
 
   /**
@@ -320,8 +381,10 @@ class render extends core
     this.cameraData.set([this.controls.cam.up.x, this.controls.cam.up.y, this.controls.cam.up.z, this.controls.cam.hp], offset);
       
     await this.cameraBuffer.update(this.cameraData);
-
     await this.counterBuffer.updateInteger(new Uint32Array([0]));
+    this.commandEncoder.clearBuffer(this.tailBuffer.buffer);
+    this.commandEncoder.clearBuffer(this.valuesBuffer.buffer);
+    this.commandEncoder.clearBuffer(this.keysBuffer.buffer);
 
     // Collect data
     const gaussians = this.primitives.map(p => ({
@@ -333,8 +396,7 @@ class render extends core
       index: p.index
     }));
     
-    const ELEMENTS_PER_STRUCT = 16; 
-    const totalBufferSize = gaussians.length * ELEMENTS_PER_STRUCT * 4; 
+    const totalBufferSize = gaussians.length * 16 * 4; 
     
     const arrayBuffer = new ArrayBuffer(totalBufferSize);
     const floatView = new Float32Array(arrayBuffer);
@@ -342,7 +404,7 @@ class render extends core
     
     for (let i = 0; i < gaussians.length; i++) {
       const g = gaussians[i];
-      const offset = i * ELEMENTS_PER_STRUCT; 
+      const offset = i * 16; 
       
       floatView[offset + 0] = g.position.x;
       floatView[offset + 1] = g.position.y;
@@ -366,10 +428,17 @@ class render extends core
     const workgroupCount = Math.floor((gaussians.length + 63) / this.workGroupSize);
     
     await this.inputBuffer.updateArray(arrayBuffer);
+    await this.keysBuffer.resize(Math.ceil(gaussians.length * 3.5) * 16);
+    await this.valuesBuffer.resize(Math.ceil(gaussians.length * 3.5) * 16);
     
-    if (this.inputBuffer.isSizeChanged)
+    let tileSizex = Math.ceil(this.canvas.width / 16);
+    let tileSizey = Math.ceil(this.canvas.height / 16);
+    
+    if (this.inputBuffer.isSizeChanged || this.keysBuffer.isSizeChanged || this.valuesBuffer.isSizeChanged)
     {
       await this.outputBuffer.resize(gaussians.length * 16 * 4);
+      this.keysBuffer.isSizeChanged = false;
+      this.valuesBuffer.isSizeChanged = false;
       this.inputBuffer.isSizeChanged = false;
       this.outputBuffer.isSizeChanged = false;
 
@@ -390,10 +459,14 @@ class render extends core
           },
           { 
             binding: 3, 
-            resource: { buffer: this.tileBuffer.buffer } 
+            resource: { buffer: this.keysBuffer.buffer } 
           },
           { 
             binding: 4, 
+            resource: { buffer: this.valuesBuffer.buffer } 
+          },
+          { 
+            binding: 5, 
             resource: { buffer: this.counterBuffer.buffer } 
           }
         ]
@@ -411,23 +484,64 @@ class render extends core
           },
           { 
             binding: 2, 
-            resource: { buffer: this.tileBuffer.buffer } 
+            resource: { buffer: this.keysBuffer.buffer } 
           },
           { 
             binding: 3, 
+            resource: { buffer: this.valuesBuffer.buffer } 
+          },
+          { 
+            binding: 4, 
+            resource: { buffer: this.tailBuffer.buffer } 
+          },
+          { 
+            binding: 5, 
             resource: this.renderTextureView 
           },
         ]
       });
-    }
-    let tileSizex = Math.ceil(this.canvas.width / 16);
-    let tileSizey = Math.ceil(this.canvas.height / 16);
-    
+
+      this.tailBindGroup = this.device.createBindGroup({
+        layout: this.tailPipeline.getBindGroupLayout(0),
+        entries: [
+          { 
+            binding: 0, 
+            resource: { buffer: this.keysBuffer.buffer } 
+          },
+          { 
+            binding: 1, 
+            resource: { buffer: this.tailBuffer.buffer }
+          },
+        ]
+      });
       
+      this.radixSortKernel = new RadixSortKernel({
+        device: this.device,
+        keys: this.keysBuffer.buffer,
+        values: this.valuesBuffer.buffer,
+        count: tileSizex * tileSizey,
+        check_order: false,
+        bit_count: 32,
+        workgroup_size: { x: 16, y: 16 },
+      })
+    }
+
     this.computePassEncoder = this.commandEncoder.beginComputePass({});
+    
+    // Project points and get matrices
     this.computePassEncoder.setPipeline(this.computePipeline);
     this.computePassEncoder.setBindGroup(0, this.bindGroup);
     this.computePassEncoder.dispatchWorkgroups(workgroupCount, 1, 1);
+
+    // Sort keys
+    this.radixSortKernel.dispatch(this.computePassEncoder);
+
+    // Get tile ranges
+    this.computePassEncoder.setPipeline(this.tailPipeline);
+    this.computePassEncoder.setBindGroup(0, this.tailBindGroup);
+    this.computePassEncoder.dispatchWorkgroups(Math.floor((tileSizex * tileSizey + 255) / 256), 1, 1);
+
+    // Rasterization
     this.computePassEncoder.setPipeline(this.rasterPipeline);
     this.computePassEncoder.setBindGroup(0, this.rasterBindGroup);
     this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
@@ -442,6 +556,17 @@ class render extends core
   public async end() {
     if (!this.commandEncoder) return;
 
+    const clearPassDescriptor: GPURenderPassDescriptor = {
+      colorAttachments: [{
+        view: this.renderTextureView, 
+        clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+        loadOp: 'clear',
+        storeOp: 'store'
+      }],
+    };
+    const clearPass = this.commandEncoder.beginRenderPass(clearPassDescriptor);
+    clearPass.end();
+
     await this.drawLow();
 
     const renderPassDescriptor: GPURenderPassDescriptor = {
@@ -452,6 +577,7 @@ class render extends core
         storeOp: 'store'
       }],
     };
+
     this.passEncoder = this.commandEncoder.beginRenderPass(renderPassDescriptor);
 
     this.passEncoder.setPipeline(this.displayPipeline);

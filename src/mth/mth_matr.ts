@@ -241,8 +241,8 @@ class mat4 {
     return new mat4(
       2 * near / (right - left), 0, 0, 0,
       0, 2 * near / (top - bottom), 0, 0,
-      (right + left) / (right - left), (top + bottom) / (top - bottom), -(far + near) / (far - near), -1,
-      0, 0, -2 * far * near / (far - near),  0
+      (right + left) / (right - left), (top + bottom) / (top - bottom), far / (far - near), 1,
+      0, 0, -far * near / (far - near),  0
     );
   } /** End of 'frustum' function */
 
@@ -259,10 +259,10 @@ class mat4 {
     const u = s.cross(f);
     
     return new mat4(
-      s.x, u.x, -f.x, 0,
-      s.y, u.y, -f.y, 0,
-      s.z, u.z, -f.z, 0,
-      -s.dot(eye), -u.dot(eye), f.dot(eye), 1
+      s.x, u.x, f.x, 0,
+      s.y, u.y, f.y, 0,
+      s.z, u.z, f.z, 0,
+      -s.dot(eye), -u.dot(eye), -f.dot(eye), 1
     );
   } /** End of 'view' function */
 
