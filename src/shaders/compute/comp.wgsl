@@ -56,11 +56,11 @@ fn quaternion_to_matrix(q_input: vec4<f32>) -> mat3x3<f32> {
   let wy = w * y;
   let wz = w * z;
 
-  return mat3x3<f32>(
+  return transpose(mat3x3<f32>(
       vec3<f32>(1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz),       2.0 * (xz - wy)),
       vec3<f32>(2.0 * (xy - wz),       1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx)),
       vec3<f32>(2.0 * (xz + wy),       2.0 * (yz - wx),       1.0 - 2.0 * (xx + yy))
-  );
+  ));
 }
 
 fn compute_covariance(s: vec3<f32>, r: vec4<f32>) -> mat3x3<f32> {
@@ -86,7 +86,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let t = camera.view * vec4<f32>(gs.position, 1.0);
   var out: rasterData;
 
-  if (t.z < 0.1) {
+  if (t.z <= 0.0) {
     return;
   }
 
@@ -107,8 +107,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
   let J = mat3x3<f32>(
     vec3<f32>(fx / t.z, 0, -(t.x * fx) / tz2),
-    vec3<f32>(0, fy / t.z, -(t.y * fy) / tz2),
-    vec3<f32>(0, 0, 1),
+    vec3<f32>(0, -fy / t.z, -(t.y * fy) / tz2),
+    vec3<f32>(0, 0, 0),
   );
 
   let w = mat3x3<f32>(
@@ -144,10 +144,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let grid_width = camera.locW.w / tile_size;
   let grid_height = camera.atH.w / tile_size;
 
-  let min_tile = vec2<i32>(max(vec2<f32>(0.0), floor(min_pixel / 16.0)));
-  let max_tile = vec2<i32>(min(
-    vec2<f32>(grid_width - 1.0, grid_height - 1.0), 
-    ceil(max_pixel / 16.0) - vec2<f32>(1.0)
+  let min_tile = vec2<i32>(clamp(
+    vec2<i32>(floor(min_pixel / tile_size - 1)), 
+    vec2<i32>(0, 0), 
+    vec2<i32>(i32(grid_width) - 1, i32(grid_height) - 1)
+  ));
+  let max_tile = vec2<i32>(clamp(
+    vec2<i32>(ceil(max_pixel / tile_size + 1)), 
+    vec2<i32>(0, 0), 
+    vec2<i32>(i32(grid_width) - 1, i32(grid_height) - 1)
   ));
 
   let depth_bits = bitcast<u32>(out.depth);
@@ -156,10 +161,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var tx = min_tile.x; tx <= max_tile.x; tx++) {
       let tile_id = u32(ty * i32(grid_width) + tx);
   
-      let key = (tile_id << 16u) | (depth_bits >> 16u); 
+      let key = (tile_id << 16u) | ((depth_bits >> 16u) & 0xFFFFu); 
   
       let global_key_idx = atomicAdd(&global_keys_counter, 1u);
-  
+
       keysBuffer[global_key_idx] = key;
       valuesBuffer[global_key_idx] = idx; 
     }

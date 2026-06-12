@@ -133,13 +133,13 @@ class render extends core
     
     this.keysBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      size: tileSizex * tileSizey * 4,
+      size: 1000000 * 4,
       label: "keys",
     })
 
     this.valuesBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      size: tileSizex * tileSizey * 4,
+      size: 1000000 * 4,
       label: "values",
     })
 
@@ -292,7 +292,7 @@ class render extends core
       device: this.device,
       keys: this.keysBuffer.buffer,
       values: this.valuesBuffer.buffer,
-      count: tileSizex * tileSizey,
+      count: 1000000,
       check_order: false,
       bit_count: 32,
       workgroup_size: { x: 16, y: 16 },
@@ -428,8 +428,6 @@ class render extends core
     const workgroupCount = Math.floor((gaussians.length + 63) / this.workGroupSize);
     
     await this.inputBuffer.updateArray(arrayBuffer);
-    await this.keysBuffer.resize(Math.ceil(gaussians.length * 3.5) * 16);
-    await this.valuesBuffer.resize(Math.ceil(gaussians.length * 3.5) * 16);
     
     let tileSizex = Math.ceil(this.canvas.width / 16);
     let tileSizey = Math.ceil(this.canvas.height / 16);
@@ -519,7 +517,7 @@ class render extends core
         device: this.device,
         keys: this.keysBuffer.buffer,
         values: this.valuesBuffer.buffer,
-        count: tileSizex * tileSizey,
+        count: 1000000,
         check_order: false,
         bit_count: 32,
         workgroup_size: { x: 16, y: 16 },
@@ -539,7 +537,7 @@ class render extends core
     // Get tile ranges
     this.computePassEncoder.setPipeline(this.tailPipeline);
     this.computePassEncoder.setBindGroup(0, this.tailBindGroup);
-    this.computePassEncoder.dispatchWorkgroups(Math.floor((tileSizex * tileSizey + 255) / 256), 1, 1);
+    this.computePassEncoder.dispatchWorkgroups(Math.floor((1000000 + 255) / 256), 1, 1);
 
     // Rasterization
     this.computePassEncoder.setPipeline(this.rasterPipeline);
