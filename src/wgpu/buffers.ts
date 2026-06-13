@@ -28,7 +28,7 @@ interface buffer_descriptor {
 /** Buffer class */
 class buffer {
   /** #private parameters */
-  private bufferDesriptor!: GPUBufferDescriptor;
+  public bufferDesriptor!: GPUBufferDescriptor;
   private render: core;
   
   /**
@@ -77,14 +77,19 @@ class buffer {
    * @param newSize: number
    * @returns None.
    */
-  public async resize(newSize: number) {
-    if (this.bufferDesriptor.size >= newSize) return;
-    
-    await this.destroy();
+  public async resize(newSize: number, doublesize: boolean = false ) {
+    if (this.bufferDesriptor.size < newSize)
+    {
+      await this.destroy();
+  
+      if (doublesize)
+        this.bufferDesriptor.size = newSize * 2;
+      else
+        this.bufferDesriptor.size = newSize;
 
-    this.bufferDesriptor.size = newSize;
-    this.buffer = this.render.device.createBuffer(this.bufferDesriptor);
-    this.isSizeChanged = true;
+      this.buffer = this.render.device.createBuffer(this.bufferDesriptor);
+      this.isSizeChanged = true;
+    }
   } /** End of 'resize' function */
 
   /**

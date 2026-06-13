@@ -21,20 +21,19 @@ struct gaussainData {
 
 struct rasterData {
   center_2d: vec2<f32>,
+  padding: vec2<f32>,
   color: vec3<f32>,
   opacity: f32,
   cov_2d: vec3<f32>,
-  depth: f32,
-  index: u32,
-  dummy: f32,
+  depth: u32,
+  min_tile: vec2<i32>,
+  max_tile: vec2<i32>,
 }
 
 @group(0) @binding(0) var<uniform> camera : camData;
 @group(0) @binding(1) var<storage, read> inputData: array<gaussainData>;
 @group(0) @binding(2) var<storage, read_write> outputData: array<rasterData>;
-@group(0) @binding(3) var<storage, read_write> keysBuffer: array<u32>;
-@group(0) @binding(4) var<storage, read_write> valuesBuffer: array<u32>;
-@group(0) @binding(5) var<storage, read_write> global_keys_counter: atomic<u32>;
+@group(0) @binding(3) var<storage, read_write> global_keys_counter: atomic<u32>;
 
 fn quaternion_to_matrix(q_input: vec4<f32>) -> mat3x3<f32> {
   let q = normalize(q_input);
@@ -86,11 +85,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let t = camera.view * vec4<f32>(gs.position, 1.0);
   var out: rasterData;
 
-  if (t.z <= 0.0) {
+  if (t.z <= 0.1) {
     return;
   }
-
-  out.depth = t.z;
 
   let half_w = f32(camera.locW.w) * 0.5;
   let half_h = f32(camera.atH.w) * 0.5;
@@ -123,7 +120,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let fil = 0.3; 
   out.cov_2d = vec3<f32>(cov_2d[0][0] + fil, cov_2d[0][1], cov_2d[1][1] + fil);
   out.opacity = gs.opacity;
-  out.index = gs.index;
   out.color = gs.color.xyz;
 
   let a = out.cov_2d.x;
@@ -154,21 +150,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     vec2<i32>(0, 0), 
     vec2<i32>(i32(grid_width) - 1, i32(grid_height) - 1)
   ));
-
-  let depth_bits = bitcast<u32>(out.depth);
-
-  for (var ty = min_tile.y; ty <= max_tile.y; ty++) {
-    for (var tx = min_tile.x; tx <= max_tile.x; tx++) {
-      let tile_id = u32(ty * i32(grid_width) + tx);
   
-      let key = (tile_id << 16u) | ((depth_bits >> 16u) & 0xFFFFu); 
-  
-      let global_key_idx = atomicAdd(&global_keys_counter, 1u);
+  out.min_tile = min_tile;
+  out.max_tile = max_tile;
 
-      keysBuffer[global_key_idx] = key;
-      valuesBuffer[global_key_idx] = idx; 
-    }
-  }
+  out.depth = bitcast<u32>(t.z);
+
+  atomicAdd(&global_keys_counter, u32((max_tile.y - min_tile.y + 1) * (max_tile.x - min_tile.x + 1)));
 
   outputData[idx] = out; 
 }

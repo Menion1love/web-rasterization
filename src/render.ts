@@ -67,23 +67,27 @@ class render extends core
   private radixSortKernel!: RadixSortKernel;
   private workGroupSize = 64;
   private computePipeline!: GPUComputePipeline;
-  private tailPipeline!: GPUComputePipeline;
+  private keysPipeline!: GPUComputePipeline;
+  private tilePipeline!: GPUComputePipeline;
   private rasterPipeline!: GPUComputePipeline;
   private displayPipeline!: GPURenderPipeline;
   private bindGroup!: GPUBindGroup;
-  private tailBindGroup!: GPUBindGroup;
+  private tileBindGroup!: GPUBindGroup;
+  private keysBindGroup!: GPUBindGroup;
   private rasterBindGroup!: GPUBindGroup;
   private displayBindGroup!: GPUBindGroup;
   private inputBuffer!: buffer;
   private outputBuffer!: buffer;
   private keysBuffer!: buffer;
   private valuesBuffer!: buffer;
-  private tailBuffer!: buffer;
+  private tileBuffer!: buffer;
   private counterBuffer!: buffer;
+  private stagingBuffer!: buffer;
   private cameraBuffer!: buffer;
   private cameraData!: Float32Array;
 
   private primitives: primitive[] = [];
+  private globalKeysCount: number = 1;
 
   /**
    * @info Initialize context function
@@ -107,7 +111,13 @@ class render extends core
     this.keysBuffer = new buffer(this);
     this.counterBuffer = new buffer(this);
     this.valuesBuffer = new buffer(this);
-    this.tailBuffer = new buffer(this);
+    this.tileBuffer = new buffer(this);
+    this.stagingBuffer = new buffer(this);
+
+    this.stagingBuffer.create({
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      size: 4,
+    })
 
     this.inputBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -133,24 +143,24 @@ class render extends core
     
     this.keysBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      size: 1000000 * 4,
+      size: 4,
       label: "keys",
     })
 
     this.valuesBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      size: 1000000 * 4,
+      size: 4,
       label: "values",
     })
 
-    this.tailBuffer.create({
+    this.tileBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       size: tileSizex * tileSizey * 8,
-      label: "tail",
+      label: "tile",
     })
 
     this.counterBuffer.create({
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
       size: 4,
     })
 
@@ -178,28 +188,20 @@ class render extends core
         },
         { 
           binding: 3, 
-          resource: { buffer: this.keysBuffer.buffer } 
-        },
-        { 
-          binding: 4, 
-          resource: { buffer: this.valuesBuffer.buffer } 
-        },
-        { 
-          binding: 5, 
           resource: { buffer: this.counterBuffer.buffer } 
         }
       ]
     });
 
-    const tailShaderModule = await this.loadShaderModule("src/shaders/compute/tailer.wgsl");
+    const tileShaderModule = await this.loadShaderModule("src/shaders/compute/tailer.wgsl");
 
-    this.tailPipeline = this.device.createComputePipeline({
+    this.tilePipeline = this.device.createComputePipeline({
       layout: 'auto',
-      compute: { module: tailShaderModule, entryPoint: 'main' }
+      compute: { module: tileShaderModule, entryPoint: 'main' }
     });
 
-    this.tailBindGroup = this.device.createBindGroup({
-      layout: this.tailPipeline.getBindGroupLayout(0),
+    this.tileBindGroup = this.device.createBindGroup({
+      layout: this.tilePipeline.getBindGroupLayout(0),
       entries: [
         { 
           binding: 0, 
@@ -207,8 +209,41 @@ class render extends core
         },
         { 
           binding: 1, 
-          resource: { buffer: this.tailBuffer.buffer }
+          resource: { buffer: this.tileBuffer.buffer }
         },
+      ]
+    });
+
+    const keysShaderModule = await this.loadShaderModule("src/shaders/compute/keys.wgsl");
+
+    this.keysPipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: keysShaderModule, entryPoint: 'main' }
+    });
+
+    this.keysBindGroup = this.device.createBindGroup({
+      layout: this.keysPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.cameraBuffer.buffer }
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.outputBuffer.buffer } 
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.keysBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: { buffer: this.valuesBuffer.buffer } 
+        },
+        { 
+          binding: 4, 
+          resource: { buffer: this.counterBuffer.buffer } 
+        }
       ]
     });
 
@@ -232,18 +267,14 @@ class render extends core
         },
         { 
           binding: 2, 
-          resource: { buffer: this.keysBuffer.buffer } 
-        },
-        { 
-          binding: 3, 
           resource: { buffer: this.valuesBuffer.buffer } 
         },
         { 
-          binding: 4, 
-          resource: { buffer: this.tailBuffer.buffer } 
+          binding: 3, 
+          resource: { buffer: this.tileBuffer.buffer } 
         },
         { 
-          binding: 5, 
+          binding: 4, 
           resource: this.renderTextureView 
         },
       ]
@@ -292,7 +323,7 @@ class render extends core
       device: this.device,
       keys: this.keysBuffer.buffer,
       values: this.valuesBuffer.buffer,
-      count: 1000000,
+      count: 1,
       check_order: false,
       bit_count: 32,
       workgroup_size: { x: 16, y: 16 },
@@ -359,6 +390,20 @@ class render extends core
     this.primitives.push(prim);
   } /** End of 'draw' function */
 
+  private async readCounter() {
+    await this.stagingBuffer.buffer.mapAsync(GPUMapMode.READ);
+
+    const arrayBuffer = this.stagingBuffer.buffer.getMappedRange();
+
+    const view = new Uint32Array(arrayBuffer);
+    
+    const globalKeysCount = view[0];
+
+    this.stagingBuffer.buffer.unmap();
+
+    return globalKeysCount;
+  }
+
   /**
    * @info Draw low level function
    * @returns None.
@@ -382,7 +427,10 @@ class render extends core
       
     await this.cameraBuffer.update(this.cameraData);
     await this.counterBuffer.updateInteger(new Uint32Array([0]));
-    this.commandEncoder.clearBuffer(this.tailBuffer.buffer);
+    await this.keysBuffer.resize(this.globalKeysCount * 4, true);
+    await this.valuesBuffer.resize(this.globalKeysCount * 4, true);
+
+    this.commandEncoder.clearBuffer(this.tileBuffer.buffer);
     this.commandEncoder.clearBuffer(this.valuesBuffer.buffer);
     this.commandEncoder.clearBuffer(this.keysBuffer.buffer);
 
@@ -425,18 +473,14 @@ class render extends core
       
       uintView[offset + 13] = g.index;
     }
-    const workgroupCount = Math.floor((gaussians.length + 63) / this.workGroupSize);
-    
     await this.inputBuffer.updateArray(arrayBuffer);
     
     let tileSizex = Math.ceil(this.canvas.width / 16);
     let tileSizey = Math.ceil(this.canvas.height / 16);
     
-    if (this.inputBuffer.isSizeChanged || this.keysBuffer.isSizeChanged || this.valuesBuffer.isSizeChanged)
+    if (this.inputBuffer.isSizeChanged)
     {
       await this.outputBuffer.resize(gaussians.length * 16 * 4);
-      this.keysBuffer.isSizeChanged = false;
-      this.valuesBuffer.isSizeChanged = false;
       this.inputBuffer.isSizeChanged = false;
       this.outputBuffer.isSizeChanged = false;
 
@@ -457,20 +501,14 @@ class render extends core
           },
           { 
             binding: 3, 
-            resource: { buffer: this.keysBuffer.buffer } 
-          },
-          { 
-            binding: 4, 
-            resource: { buffer: this.valuesBuffer.buffer } 
-          },
-          { 
-            binding: 5, 
             resource: { buffer: this.counterBuffer.buffer } 
           }
         ]
       });
-      this.rasterBindGroup = this.device.createBindGroup({
-        layout: this.rasterPipeline.getBindGroupLayout(0),
+
+      
+      this.keysBindGroup = this.device.createBindGroup({
+        layout: this.keysPipeline.getBindGroupLayout(0),
         entries: [
           { 
             binding: 0,
@@ -490,38 +528,36 @@ class render extends core
           },
           { 
             binding: 4, 
-            resource: { buffer: this.tailBuffer.buffer } 
+            resource: { buffer: this.counterBuffer.buffer } 
+          }
+        ]
+      });
+
+      this.rasterBindGroup = this.device.createBindGroup({
+        layout: this.rasterPipeline.getBindGroupLayout(0),
+        entries: [
+          { 
+            binding: 0,
+            resource: { buffer: this.cameraBuffer.buffer }
           },
           { 
-            binding: 5, 
+            binding: 1, 
+            resource: { buffer: this.outputBuffer.buffer } 
+          },
+          { 
+            binding: 2, 
+            resource: { buffer: this.valuesBuffer.buffer } 
+          },
+          { 
+            binding: 3, 
+            resource: { buffer: this.tileBuffer.buffer } 
+          },
+          { 
+            binding: 4, 
             resource: this.renderTextureView 
           },
         ]
       });
-
-      this.tailBindGroup = this.device.createBindGroup({
-        layout: this.tailPipeline.getBindGroupLayout(0),
-        entries: [
-          { 
-            binding: 0, 
-            resource: { buffer: this.keysBuffer.buffer } 
-          },
-          { 
-            binding: 1, 
-            resource: { buffer: this.tailBuffer.buffer }
-          },
-        ]
-      });
-      
-      this.radixSortKernel = new RadixSortKernel({
-        device: this.device,
-        keys: this.keysBuffer.buffer,
-        values: this.valuesBuffer.buffer,
-        count: 1000000,
-        check_order: false,
-        bit_count: 32,
-        workgroup_size: { x: 16, y: 16 },
-      })
     }
 
     this.computePassEncoder = this.commandEncoder.beginComputePass({});
@@ -529,15 +565,124 @@ class render extends core
     // Project points and get matrices
     this.computePassEncoder.setPipeline(this.computePipeline);
     this.computePassEncoder.setBindGroup(0, this.bindGroup);
-    this.computePassEncoder.dispatchWorkgroups(workgroupCount, 1, 1);
+    this.computePassEncoder.dispatchWorkgroups(Math.floor((gaussians.length + 63) / this.workGroupSize), 1, 1);
+    this.computePassEncoder.end();
+
+    this.commandEncoder.copyBufferToBuffer(
+      this.counterBuffer.buffer,
+      0,
+      this.stagingBuffer.buffer,
+      0,
+      4
+    );
+
+    // Resize keys and values buffer
+    this.globalKeysCount = await this.readCounter();
+    console.log(this.globalKeysCount);
+
+    const resize = async () => {
+      if (this.keysBuffer.isSizeChanged || this.valuesBuffer.isSizeChanged)
+      {
+        this.keysBuffer.isSizeChanged = false;
+        this.valuesBuffer.isSizeChanged = false;
+
+        this.tileBindGroup = this.device.createBindGroup({
+          layout: this.tilePipeline.getBindGroupLayout(0),
+          entries: [
+            { 
+              binding: 0, 
+              resource: { buffer: this.keysBuffer.buffer } 
+            },
+            { 
+              binding: 1, 
+              resource: { buffer: this.tileBuffer.buffer }
+            },
+          ]
+        });
+        
+        this.keysBindGroup = this.device.createBindGroup({
+          layout: this.keysPipeline.getBindGroupLayout(0),
+          entries: [
+            { 
+              binding: 0,
+              resource: { buffer: this.cameraBuffer.buffer }
+            },
+            { 
+              binding: 1, 
+              resource: { buffer: this.outputBuffer.buffer } 
+            },
+            { 
+              binding: 2, 
+              resource: { buffer: this.keysBuffer.buffer } 
+            },
+            { 
+              binding: 3, 
+              resource: { buffer: this.valuesBuffer.buffer } 
+            },
+            { 
+              binding: 4, 
+              resource: { buffer: this.counterBuffer.buffer } 
+            }
+          ]
+        });
+
+        this.rasterBindGroup = this.device.createBindGroup({
+          layout: this.rasterPipeline.getBindGroupLayout(0),
+          entries: [
+            { 
+              binding: 0,
+              resource: { buffer: this.cameraBuffer.buffer }
+            },
+            { 
+              binding: 1, 
+              resource: { buffer: this.outputBuffer.buffer } 
+            },
+            { 
+              binding: 2, 
+              resource: { buffer: this.valuesBuffer.buffer } 
+            },
+            { 
+              binding: 3, 
+              resource: { buffer: this.tileBuffer.buffer } 
+            },
+            { 
+              binding: 4, 
+              resource: this.renderTextureView 
+            },
+          ]
+        });
+
+        this.radixSortKernel = new RadixSortKernel({
+          device: this.device,
+          keys: this.keysBuffer.buffer,
+          values: this.valuesBuffer.buffer,
+          count: this.globalKeysCount,
+          check_order: false,
+          bit_count: 32,
+          workgroup_size: { x: 16, y: 16 },
+        })
+      }
+    }
+    await resize();
+
+    // Update counter
+    this.commandEncoder.clearBuffer(this.counterBuffer.buffer);
+    if (this.globalKeysCount == 0) return;
+
+    this.computePassEncoder = this.commandEncoder.beginComputePass({});
+
+    // Fill keys and values
+    this.computePassEncoder.setPipeline(this.keysPipeline);
+    this.computePassEncoder.setBindGroup(0, this.keysBindGroup);
+    this.computePassEncoder.dispatchWorkgroups(Math.floor((gaussians.length + 63) / this.workGroupSize), 1, 1);
 
     // Sort keys
     this.radixSortKernel.dispatch(this.computePassEncoder);
 
     // Get tile ranges
-    this.computePassEncoder.setPipeline(this.tailPipeline);
-    this.computePassEncoder.setBindGroup(0, this.tailBindGroup);
-    this.computePassEncoder.dispatchWorkgroups(Math.floor((1000000 + 255) / 256), 1, 1);
+    this.computePassEncoder.setPipeline(this.tilePipeline);
+    this.computePassEncoder.setBindGroup(0, this.tileBindGroup);
+    this.computePassEncoder.dispatchWorkgroups(Math.floor((this.globalKeysCount + 255) / 256), 1, 1);
 
     // Rasterization
     this.computePassEncoder.setPipeline(this.rasterPipeline);
