@@ -45,7 +45,11 @@ class core
     this.adapter = adapter;
 
     // get device
-    this.device = await this.adapter.requestDevice();
+    this.device = await this.adapter.requestDevice(
+      {
+        requiredLimits: { maxComputeWorkgroupStorageSize: adapter.limits.maxComputeWorkgroupStorageSize,}
+      }
+    );
 
     // get queue
     this.queue = this.device.queue;

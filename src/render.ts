@@ -57,7 +57,7 @@ export class primitive
  **/
 class render extends core
 {
-  private controls!: control;
+  public controls!: control;
   private commandEncoder!: GPUCommandEncoder | null;
   private passEncoder!: GPURenderPassEncoder | null;
   private computePassEncoder!: GPUComputePassEncoder | null;
@@ -86,6 +86,15 @@ class render extends core
   private cameraBuffer!: buffer;
   private cameraData!: Float32Array;
 
+  private transmittanceTexture!: GPUTexture | null;
+  private transmittanceTextureView!: GPUTextureView | null;
+  private gradientTexture!: GPUTexture | null;
+  private gradientTextureView!: GPUTextureView | null;
+  public imageTexture!: GPUTexture | null;
+  public imageTextureView!: GPUTextureView | null;
+  private gradientPipeline!: GPUComputePipeline;
+  private gradientBindGroup!: GPUBindGroup;
+
   private primitives: primitive[] = [];
   private globalKeysCount: number = 1;
 
@@ -104,6 +113,30 @@ class render extends core
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE_BINDING  
     });
     this.renderTextureView = this.renderTexture.createView();
+
+    this.imageTexture = this.device.createTexture({
+      size: [this.canvas.width, this.canvas.height], 
+      format: 'rgba8unorm', 
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.STORAGE_BINDING  
+    });
+
+    this.imageTextureView = this.imageTexture.createView();
+    
+    this.gradientTexture = this.device.createTexture({
+      size: [this.canvas.width, this.canvas.height], 
+      format: 'rgba32float', 
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE_BINDING  
+    });
+
+    this.gradientTextureView = this.gradientTexture.createView();
+    
+    this.transmittanceTexture = this.device.createTexture({
+      size: [this.canvas.width, this.canvas.height], 
+      format: 'r32float', 
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE_BINDING  
+    });
+
+    this.transmittanceTextureView = this.transmittanceTexture.createView();
     
     this.inputBuffer = new buffer(this);
     this.outputBuffer = new buffer(this);
@@ -164,7 +197,7 @@ class render extends core
       size: 4,
     })
 
-    const shaderModule = await this.loadShaderModule("src/shaders/compute/comp.wgsl");
+    const shaderModule = await this.loadShaderModule("src/shaders/forward/comp.wgsl");
     
     this.computePipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -193,7 +226,7 @@ class render extends core
       ]
     });
 
-    const tileShaderModule = await this.loadShaderModule("src/shaders/compute/tailer.wgsl");
+    const tileShaderModule = await this.loadShaderModule("src/shaders/forward/tailer.wgsl");
 
     this.tilePipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -214,7 +247,7 @@ class render extends core
       ]
     });
 
-    const keysShaderModule = await this.loadShaderModule("src/shaders/compute/keys.wgsl");
+    const keysShaderModule = await this.loadShaderModule("src/shaders/forward/keys.wgsl");
 
     this.keysPipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -247,7 +280,7 @@ class render extends core
       ]
     });
 
-    const rasterShaderModule = await this.loadShaderModule("src/shaders/compute/raster.wgsl");
+    const rasterShaderModule = await this.loadShaderModule("src/shaders/forward/raster.wgsl");
 
     this.rasterPipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -277,18 +310,72 @@ class render extends core
           binding: 4, 
           resource: this.renderTextureView 
         },
+        { 
+          binding: 5, 
+          resource: this.transmittanceTextureView 
+        },
+      ]
+    });
+
+    const gradientShaderModule = await this.loadShaderModule("src/shaders/learn/gradient.wgsl");
+
+    this.gradientPipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: gradientShaderModule, entryPoint: 'main' }
+    });
+
+    this.gradientBindGroup = this.device.createBindGroup({
+      layout: this.gradientPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0, 
+          resource: this.renderTextureView 
+        },
+        { 
+          binding: 1, 
+          resource: this.imageTextureView 
+        },
+        { 
+          binding: 2, 
+          resource: this.gradientTextureView
+        },
       ]
     });
 
     const displayShaderModule = await this.loadShaderModule("src/shaders/display/display.wgsl");
 
     const sampler = this.device.createSampler({
-      magFilter: 'linear',
-      minFilter: 'linear',
+      magFilter: 'nearest', 
+      minFilter: 'nearest',  
+      mipmapFilter: 'nearest' 
     });
 
+    const displayBindGroupLayout = this.device.createBindGroupLayout({
+      label: "Display Bind Group Layout (32Float)",
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            sampleType: 'unfilterable-float', 
+            viewDimension: '2d',
+            multisampled: false
+          }
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: {
+            type: 'non-filtering' 
+          }
+        }
+      ]
+    });
+    
     this.displayPipeline = this.device.createRenderPipeline({
-      layout: 'auto',
+      layout: this.device.createPipelineLayout({
+        bindGroupLayouts: [displayBindGroupLayout] 
+      }),
       vertex: {
         module: displayShaderModule,
         entryPoint: 'vs_main',
@@ -306,11 +393,11 @@ class render extends core
     });
 
     this.displayBindGroup = this.device.createBindGroup({
-      layout: this.displayPipeline.getBindGroupLayout(0),
+      layout: displayBindGroupLayout,
       entries: [
         { 
           binding: 0,
-          resource: this.renderTextureView
+          resource: this.gradientTextureView
         },
         {
           binding: 1,
@@ -330,6 +417,27 @@ class render extends core
     })
 
   } /** End of 'constructor' function */
+
+  public reload()
+  {
+    this.gradientBindGroup = this.device.createBindGroup({
+      layout: this.gradientPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0, 
+          resource: this.renderTextureView 
+        },
+        { 
+          binding: 1, 
+          resource: this.imageTextureView 
+        },
+        { 
+          binding: 2, 
+          resource: this.gradientTextureView
+        },
+      ]
+    });
+  }
 
   /**
    * @info Load shader module function
@@ -390,49 +498,18 @@ class render extends core
     this.primitives.push(prim);
   } /** End of 'draw' function */
 
-  private async readCounter() {
-    await this.stagingBuffer.buffer.mapAsync(GPUMapMode.READ);
-
-    const arrayBuffer = this.stagingBuffer.buffer.getMappedRange();
-
-    const view = new Uint32Array(arrayBuffer);
-    
-    const globalKeysCount = view[0];
-
-    this.stagingBuffer.buffer.unmap();
-
-    return globalKeysCount;
+  public async primsClear() {
+    this.primitives = [];
   }
 
   /**
-   * @info Draw low level function
+   * @info Attach primitives to draw
+   * @param primitive[] : array of primitives to draw
    * @returns None.
    */
-  private async drawLow() {
-    if (this.primitives.length == 0 || !this.commandEncoder) 
-      return;
-    
-    if (!this.cameraData) 
-      this.cameraData = new Float32Array(64 + 64 + 64 + 16 * 5);
-
-    let offset = 0;
-    this.cameraData.set(this.controls.cam.view.m.flat(), offset); offset += 16;
-    this.cameraData.set(this.controls.cam.proj.m.flat(), offset); offset += 16;
-    this.cameraData.set(this.controls.cam.vp.m.flat(), offset); offset += 16;
-    this.cameraData.set([this.controls.cam.loc.x, this.controls.cam.loc.y, this.controls.cam.loc.z, this.controls.cam.frameW], offset); offset += 4;
-    this.cameraData.set([this.controls.cam.at.x, this.controls.cam.at.y, this.controls.cam.at.z, this.controls.cam.frameH], offset); offset += 4;
-    this.cameraData.set([this.controls.cam.dir.x, this.controls.cam.dir.y, this.controls.cam.dir.z, this.controls.cam.projDist], offset); offset += 4;
-    this.cameraData.set([this.controls.cam.right.x, this.controls.cam.right.y, this.controls.cam.right.z, this.controls.cam.wp], offset); offset += 4;
-    this.cameraData.set([this.controls.cam.up.x, this.controls.cam.up.y, this.controls.cam.up.z, this.controls.cam.hp], offset);
-      
-    await this.cameraBuffer.update(this.cameraData);
-    await this.counterBuffer.updateInteger(new Uint32Array([0]));
-    await this.keysBuffer.resize(this.globalKeysCount * 4, true);
-    await this.valuesBuffer.resize(this.globalKeysCount * 4, true);
-
-    this.commandEncoder.clearBuffer(this.tileBuffer.buffer);
-    this.commandEncoder.clearBuffer(this.valuesBuffer.buffer);
-    this.commandEncoder.clearBuffer(this.keysBuffer.buffer);
+  public async attachToDraw(prims: primitive[]) {
+    for (let i = 0; i < prims.length; i++)
+      this.draw(prims[i]);
 
     // Collect data
     const gaussians = this.primitives.map(p => ({
@@ -474,13 +551,58 @@ class render extends core
       uintView[offset + 13] = g.index;
     }
     await this.inputBuffer.updateArray(arrayBuffer);
+  }
+
+  private async readCounter() {
+    await this.stagingBuffer.buffer.mapAsync(GPUMapMode.READ);
+
+    const arrayBuffer = this.stagingBuffer.buffer.getMappedRange();
+
+    const view = new Uint32Array(arrayBuffer);
+    
+    const globalKeysCount = view[0];
+
+    this.stagingBuffer.buffer.unmap();
+
+    return globalKeysCount;
+  }
+
+  /**
+   * @info Draw low level function
+   * @returns None.
+   */
+  private async drawLow() {
+    if (this.primitives.length == 0 || !this.commandEncoder) 
+      return;
+    
+    if (!this.cameraData) 
+      this.cameraData = new Float32Array(64 + 64 + 64 + 16 * 5);
+
+    let offset = 0;
+    this.cameraData.set(this.controls.cam.view.m.flat(), offset); offset += 16;
+    this.cameraData.set(this.controls.cam.proj.m.flat(), offset); offset += 16;
+    this.cameraData.set(this.controls.cam.vp.m.flat(), offset); offset += 16;
+    this.cameraData.set([this.controls.cam.loc.x, this.controls.cam.loc.y, this.controls.cam.loc.z, this.controls.cam.frameW], offset); offset += 4;
+    this.cameraData.set([this.controls.cam.at.x, this.controls.cam.at.y, this.controls.cam.at.z, this.controls.cam.frameH], offset); offset += 4;
+    this.cameraData.set([this.controls.cam.dir.x, this.controls.cam.dir.y, this.controls.cam.dir.z, this.controls.cam.projDist], offset); offset += 4;
+    this.cameraData.set([this.controls.cam.right.x, this.controls.cam.right.y, this.controls.cam.right.z, this.controls.cam.wp], offset); offset += 4;
+    this.cameraData.set([this.controls.cam.up.x, this.controls.cam.up.y, this.controls.cam.up.z, this.controls.cam.hp], offset);
+      
+    await this.cameraBuffer.update(this.cameraData);
+    await this.counterBuffer.updateInteger(new Uint32Array([0]));
+
+    this.commandEncoder.clearBuffer(this.tileBuffer.buffer);
+    this.commandEncoder.clearBuffer(this.valuesBuffer.buffer);
+    this.commandEncoder.clearBuffer(this.keysBuffer.buffer);
     
     let tileSizex = Math.ceil(this.canvas.width / 16);
     let tileSizey = Math.ceil(this.canvas.height / 16);
+
+    const len = this.primitives.length;
     
     if (this.inputBuffer.isSizeChanged)
     {
-      await this.outputBuffer.resize(gaussians.length * 16 * 4);
+      await this.outputBuffer.resize(len * 16 * 4);
       this.inputBuffer.isSizeChanged = false;
       this.outputBuffer.isSizeChanged = false;
 
@@ -556,6 +678,10 @@ class render extends core
             binding: 4, 
             resource: this.renderTextureView 
           },
+          { 
+            binding: 5, 
+            resource: this.transmittanceTextureView 
+          },
         ]
       });
     }
@@ -565,7 +691,7 @@ class render extends core
     // Project points and get matrices
     this.computePassEncoder.setPipeline(this.computePipeline);
     this.computePassEncoder.setBindGroup(0, this.bindGroup);
-    this.computePassEncoder.dispatchWorkgroups(Math.floor((gaussians.length + 63) / this.workGroupSize), 1, 1);
+    this.computePassEncoder.dispatchWorkgroups(Math.floor((len + 63) / this.workGroupSize), 1, 1);
     this.computePassEncoder.end();
 
     this.commandEncoder.copyBufferToBuffer(
@@ -578,93 +704,94 @@ class render extends core
 
     // Resize keys and values buffer
     this.globalKeysCount = await this.readCounter();
-    console.log(this.globalKeysCount);
+    await this.keysBuffer.resize(this.globalKeysCount * 4, true);
+    await this.valuesBuffer.resize(this.globalKeysCount * 4, true);
 
-    const resize = async () => {
-      if (this.keysBuffer.isSizeChanged || this.valuesBuffer.isSizeChanged)
-      {
-        this.keysBuffer.isSizeChanged = false;
-        this.valuesBuffer.isSizeChanged = false;
+    if (this.keysBuffer.isSizeChanged || this.valuesBuffer.isSizeChanged)
+    {
+      this.keysBuffer.isSizeChanged = false;
+      this.valuesBuffer.isSizeChanged = false;
+      this.tileBindGroup = this.device.createBindGroup({
+        layout: this.tilePipeline.getBindGroupLayout(0),
+        entries: [
+          { 
+            binding: 0, 
+            resource: { buffer: this.keysBuffer.buffer } 
+          },
+          { 
+            binding: 1, 
+            resource: { buffer: this.tileBuffer.buffer }
+          },
+        ]
+      });
+      
+      this.keysBindGroup = this.device.createBindGroup({
+        layout: this.keysPipeline.getBindGroupLayout(0),
+        entries: [
+          { 
+            binding: 0,
+            resource: { buffer: this.cameraBuffer.buffer }
+          },
+          { 
+            binding: 1, 
+            resource: { buffer: this.outputBuffer.buffer } 
+          },
+          { 
+            binding: 2, 
+            resource: { buffer: this.keysBuffer.buffer } 
+          },
+          { 
+            binding: 3, 
+            resource: { buffer: this.valuesBuffer.buffer } 
+          },
+          { 
+            binding: 4, 
+            resource: { buffer: this.counterBuffer.buffer } 
+          }
+        ]
+      });
 
-        this.tileBindGroup = this.device.createBindGroup({
-          layout: this.tilePipeline.getBindGroupLayout(0),
-          entries: [
-            { 
-              binding: 0, 
-              resource: { buffer: this.keysBuffer.buffer } 
-            },
-            { 
-              binding: 1, 
-              resource: { buffer: this.tileBuffer.buffer }
-            },
-          ]
-        });
-        
-        this.keysBindGroup = this.device.createBindGroup({
-          layout: this.keysPipeline.getBindGroupLayout(0),
-          entries: [
-            { 
-              binding: 0,
-              resource: { buffer: this.cameraBuffer.buffer }
-            },
-            { 
-              binding: 1, 
-              resource: { buffer: this.outputBuffer.buffer } 
-            },
-            { 
-              binding: 2, 
-              resource: { buffer: this.keysBuffer.buffer } 
-            },
-            { 
-              binding: 3, 
-              resource: { buffer: this.valuesBuffer.buffer } 
-            },
-            { 
-              binding: 4, 
-              resource: { buffer: this.counterBuffer.buffer } 
-            }
-          ]
-        });
+      this.rasterBindGroup = this.device.createBindGroup({
+        layout: this.rasterPipeline.getBindGroupLayout(0),
+        entries: [
+          { 
+            binding: 0,
+            resource: { buffer: this.cameraBuffer.buffer }
+          },
+          { 
+            binding: 1, 
+            resource: { buffer: this.outputBuffer.buffer } 
+          },
+          { 
+            binding: 2, 
+            resource: { buffer: this.valuesBuffer.buffer } 
+          },
+          { 
+            binding: 3, 
+            resource: { buffer: this.tileBuffer.buffer } 
+          },
+          { 
+            binding: 4, 
+            resource: this.renderTextureView 
+          },
+          { 
+            binding: 5, 
+            resource: this.transmittanceTextureView 
+          },
+        ]
+      });
 
-        this.rasterBindGroup = this.device.createBindGroup({
-          layout: this.rasterPipeline.getBindGroupLayout(0),
-          entries: [
-            { 
-              binding: 0,
-              resource: { buffer: this.cameraBuffer.buffer }
-            },
-            { 
-              binding: 1, 
-              resource: { buffer: this.outputBuffer.buffer } 
-            },
-            { 
-              binding: 2, 
-              resource: { buffer: this.valuesBuffer.buffer } 
-            },
-            { 
-              binding: 3, 
-              resource: { buffer: this.tileBuffer.buffer } 
-            },
-            { 
-              binding: 4, 
-              resource: this.renderTextureView 
-            },
-          ]
-        });
-
-        this.radixSortKernel = new RadixSortKernel({
-          device: this.device,
-          keys: this.keysBuffer.buffer,
-          values: this.valuesBuffer.buffer,
-          count: this.globalKeysCount,
-          check_order: false,
-          bit_count: 32,
-          workgroup_size: { x: 16, y: 16 },
-        })
-      }
+      this.radixSortKernel = new RadixSortKernel({
+        device: this.device,
+        keys: this.keysBuffer.buffer,
+        values: this.valuesBuffer.buffer,
+        count: this.keysBuffer.bufferDesriptor.size / 4,
+        check_order: false,
+        bit_count: 32,
+        workgroup_size: { x: 16, y: 16 },
+      })
     }
-    await resize();
-
+    
     // Update counter
     this.commandEncoder.clearBuffer(this.counterBuffer.buffer);
     if (this.globalKeysCount == 0) return;
@@ -674,7 +801,7 @@ class render extends core
     // Fill keys and values
     this.computePassEncoder.setPipeline(this.keysPipeline);
     this.computePassEncoder.setBindGroup(0, this.keysBindGroup);
-    this.computePassEncoder.dispatchWorkgroups(Math.floor((gaussians.length + 63) / this.workGroupSize), 1, 1);
+    this.computePassEncoder.dispatchWorkgroups(Math.floor((len + 63) / this.workGroupSize), 1, 1);
 
     // Sort keys
     this.radixSortKernel.dispatch(this.computePassEncoder);
@@ -682,11 +809,18 @@ class render extends core
     // Get tile ranges
     this.computePassEncoder.setPipeline(this.tilePipeline);
     this.computePassEncoder.setBindGroup(0, this.tileBindGroup);
-    this.computePassEncoder.dispatchWorkgroups(Math.floor((this.globalKeysCount + 255) / 256), 1, 1);
+    this.computePassEncoder.dispatchWorkgroups(Math.floor((this.keysBuffer.bufferDesriptor.size / 4 + 255) / 256), 1, 1);
 
     // Rasterization
     this.computePassEncoder.setPipeline(this.rasterPipeline);
     this.computePassEncoder.setBindGroup(0, this.rasterBindGroup);
+    this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
+    this.computePassEncoder.end();
+
+    this.computePassEncoder = this.commandEncoder.beginComputePass({});
+    
+    this.computePassEncoder.setPipeline(this.gradientPipeline);
+    this.computePassEncoder.setBindGroup(0, this.gradientBindGroup);
     this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
     this.computePassEncoder.end();
   } /** End of 'drawLow' function */
@@ -696,21 +830,29 @@ class render extends core
    * @param None. 
    * @returns None.
    */
-  public async end() {
+  public async end(flag: boolean) {
     if (!this.commandEncoder) return;
 
-    const clearPassDescriptor: GPURenderPassDescriptor = {
-      colorAttachments: [{
-        view: this.renderTextureView, 
-        clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
-        loadOp: 'clear',
-        storeOp: 'store'
-      }],
-    };
-    const clearPass = this.commandEncoder.beginRenderPass(clearPassDescriptor);
-    clearPass.end();
-
-    await this.drawLow();
+    if (flag)
+    {
+      const clearPassDescriptor: GPURenderPassDescriptor = {
+        colorAttachments: [{
+          view: this.renderTextureView, 
+          clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+          loadOp: 'clear',
+          storeOp: 'store'
+        },
+        {
+          view: this.gradientTextureView, 
+          clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+          loadOp: 'clear',
+          storeOp: 'store'
+        }],
+      };
+      const clearPass = this.commandEncoder.beginRenderPass(clearPassDescriptor);
+      clearPass.end();
+      await this.drawLow();
+    }
 
     const renderPassDescriptor: GPURenderPassDescriptor = {
       colorAttachments: [{
@@ -733,7 +875,7 @@ class render extends core
     this.passEncoder = null;
     this.commandEncoder = null;
     input.clear();
-    this.primitives = [];
+    // this.primitives = [];
   } /** End of 'end' function */
 } /** End of 'render' class */
 

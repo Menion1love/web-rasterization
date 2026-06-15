@@ -30,6 +30,7 @@ struct tailData {
 @group(0) @binding(2) var<storage, read_write> valuesBuffer: array<u32>;
 @group(0) @binding(3) var<storage, read_write> tail_ranges: array<tailData>;
 @group(0) @binding(4) var tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(5) var tex_t: texture_storage_2d<r32float, write>;
 
 @compute @workgroup_size(16, 16, 1)
 fn main(@builtin(workgroup_id) workgroup_id : vec3<u32>, @builtin(local_invocation_id) local_id : vec3<u32>, @builtin(global_invocation_id) global_id : vec3<u32>) {
@@ -49,11 +50,9 @@ fn main(@builtin(workgroup_id) workgroup_id : vec3<u32>, @builtin(local_invocati
 
   var final_color = vec3<f32>(0.0, 0.0, 0.0);
   var transmittance = 1.0;
-
-  let a123 = valuesBuffer[0];
   
   for (var i = start_idx; i < end_idx; i++) {
-    let data = inputData[0u];//valuesBuffer[i]];
+    let data = inputData[valuesBuffer[i]];
     
     let d = vec2<f32>(pixel_coord) - data.center_2d;
     
@@ -88,4 +87,5 @@ fn main(@builtin(workgroup_id) workgroup_id : vec3<u32>, @builtin(local_invocati
   }
   
   textureStore(tex, pixel_coord, vec4<f32>(final_color, 1.0));
+  textureStore(tex_t, pixel_coord, vec4<f32>(transmittance, 0.0, 0.0, 0.0));
 }

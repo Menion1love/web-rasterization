@@ -80,8 +80,6 @@ class buffer {
   public async resize(newSize: number, doublesize: boolean = false ) {
     if (this.bufferDesriptor.size < newSize)
     {
-      await this.destroy();
-  
       if (doublesize)
         this.bufferDesriptor.size = newSize * 2;
       else

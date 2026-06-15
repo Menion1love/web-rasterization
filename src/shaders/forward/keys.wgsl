@@ -53,12 +53,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   
       let global_key_idx = atomicAdd(&global_keys_counter, 1u);
 
-      if (global_key_idx > arrayLength(&keysBuffer))
-      {
-        inputData[idx].color = vec3f(1, 0, 0);
+      // if (global_key_idx > arrayLength(&keysBuffer))
+      // {
+      //   inputData[idx].color = vec3f(1, 0, 0);
         
-      }
-      inputData[idx].color = vec3f(f32(global_key_idx) / f32(arrayLength(&keysBuffer)));
+      // }
+      // inputData[idx].color = vec3f(f32(global_key_idx) / f32(arrayLength(&keysBuffer)));
 
       keysBuffer[global_key_idx] = key;
       valuesBuffer[global_key_idx] = idx; 
