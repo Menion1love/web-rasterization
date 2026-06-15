@@ -94,6 +94,9 @@ class render extends core
   public imageTextureView!: GPUTextureView | null;
   private gradientPipeline!: GPUComputePipeline;
   private gradientBindGroup!: GPUBindGroup;
+  private backwardPipeline!: GPUComputePipeline;
+  private backwardBindGroup!: GPUBindGroup;
+  private gGradBuffer!: buffer;
 
   private primitives: primitive[] = [];
   private globalKeysCount: number = 1;
@@ -146,6 +149,7 @@ class render extends core
     this.valuesBuffer = new buffer(this);
     this.tileBuffer = new buffer(this);
     this.stagingBuffer = new buffer(this);
+    this.gGradBuffer = new buffer(this);
 
     this.stagingBuffer.create({
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
@@ -157,6 +161,12 @@ class render extends core
       size: 64,
       label: "input",
     });
+
+    this.gGradBuffer.create({
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      size: 48,
+      label: "grad",
+    })
 
     this.outputBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
@@ -341,6 +351,48 @@ class render extends core
         },
       ]
     });
+    
+    const backwardShaderModule = await this.loadShaderModule("src/shaders/learn/backward.wgsl");
+
+    this.backwardPipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: backwardShaderModule, entryPoint: 'main' }
+    });
+
+    this.backwardBindGroup = this.device.createBindGroup({
+      layout: this.backwardPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.cameraBuffer.buffer }
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.outputBuffer.buffer } 
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.valuesBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: { buffer: this.tileBuffer.buffer } 
+        },
+        { 
+          binding: 4, 
+          resource: this.renderTextureView 
+        },
+        { 
+          binding: 5, 
+          resource: this.transmittanceTextureView 
+        },
+        { 
+          binding: 6, 
+          resource: { buffer: this.gGradBuffer.buffer }
+        },
+      ]
+    });
+
 
     const displayShaderModule = await this.loadShaderModule("src/shaders/display/display.wgsl");
 
@@ -603,6 +655,7 @@ class render extends core
     if (this.inputBuffer.isSizeChanged)
     {
       await this.outputBuffer.resize(len * 16 * 4);
+      await this.gGradBuffer.resize(len * 12 * 4);
       this.inputBuffer.isSizeChanged = false;
       this.outputBuffer.isSizeChanged = false;
 
@@ -681,6 +734,40 @@ class render extends core
           { 
             binding: 5, 
             resource: this.transmittanceTextureView 
+          },
+        ]
+      });
+      
+      this.backwardBindGroup = this.device.createBindGroup({
+        layout: this.backwardPipeline.getBindGroupLayout(0),
+        entries: [
+          { 
+            binding: 0,
+            resource: { buffer: this.cameraBuffer.buffer }
+          },
+          { 
+            binding: 1, 
+            resource: { buffer: this.outputBuffer.buffer } 
+          },
+          { 
+            binding: 2, 
+            resource: { buffer: this.valuesBuffer.buffer } 
+          },
+          { 
+            binding: 3, 
+            resource: { buffer: this.tileBuffer.buffer } 
+          },
+          { 
+            binding: 4, 
+            resource: this.renderTextureView 
+          },
+          { 
+            binding: 5, 
+            resource: this.transmittanceTextureView 
+          },
+          { 
+            binding: 6, 
+            resource: { buffer: this.gGradBuffer.buffer }
           },
         ]
       });
@@ -781,6 +868,40 @@ class render extends core
         ]
       });
 
+      this.backwardBindGroup = this.device.createBindGroup({
+        layout: this.backwardPipeline.getBindGroupLayout(0),
+        entries: [
+          { 
+            binding: 0,
+            resource: { buffer: this.cameraBuffer.buffer }
+          },
+          { 
+            binding: 1, 
+            resource: { buffer: this.outputBuffer.buffer } 
+          },
+          { 
+            binding: 2, 
+            resource: { buffer: this.valuesBuffer.buffer } 
+          },
+          { 
+            binding: 3, 
+            resource: { buffer: this.tileBuffer.buffer } 
+          },
+          { 
+            binding: 4, 
+            resource: this.renderTextureView 
+          },
+          { 
+            binding: 5, 
+            resource: this.transmittanceTextureView 
+          },
+          { 
+            binding: 6, 
+            resource: { buffer: this.gGradBuffer.buffer }
+          },
+        ]
+      });
+
       this.radixSortKernel = new RadixSortKernel({
         device: this.device,
         keys: this.keysBuffer.buffer,
@@ -821,6 +942,10 @@ class render extends core
     
     this.computePassEncoder.setPipeline(this.gradientPipeline);
     this.computePassEncoder.setBindGroup(0, this.gradientBindGroup);
+    this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
+
+    this.computePassEncoder.setPipeline(this.backwardPipeline);
+    this.computePassEncoder.setBindGroup(0, this.backwardBindGroup);
     this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
     this.computePassEncoder.end();
   } /** End of 'drawLow' function */
