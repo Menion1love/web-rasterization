@@ -97,9 +97,15 @@ class render extends core
   private backwardPipeline!: GPUComputePipeline;
   private backwardBindGroup!: GPUBindGroup;
   private gGradBuffer!: buffer;
+  private learnPipeline!: GPUComputePipeline;
+  private learnBindGroup!: GPUBindGroup;
+  private adamMBuffer!: buffer;
+  private adamVBuffer!: buffer;
+  private iteratorBuffer!: buffer;
 
   private primitives: primitive[] = [];
   private globalKeysCount: number = 1;
+  private IterationsCount: number = 1;
 
   /**
    * @info Initialize context function
@@ -150,16 +156,38 @@ class render extends core
     this.tileBuffer = new buffer(this);
     this.stagingBuffer = new buffer(this);
     this.gGradBuffer = new buffer(this);
+    this.adamMBuffer = new buffer(this);
+    this.adamVBuffer = new buffer(this);
+    this.iteratorBuffer = new buffer(this);
 
     this.stagingBuffer.create({
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       size: 4,
     })
+    
+    this.iteratorBuffer.create({
+      size: 4,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      type: "uniform",
+      label: "iterator buffer",
+    });
 
     this.inputBuffer.create({
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       size: 64,
       label: "input",
+    });
+
+    this.adamMBuffer.create({
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      size: 64,
+      label: "adam M",
+    });
+
+    this.adamVBuffer.create({
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      size: 64,
+      label: "adam V",
     });
 
     this.gGradBuffer.create({
@@ -393,6 +421,42 @@ class render extends core
       ]
     });
 
+    const learnShaderModule = await this.loadShaderModule("src/shaders/learn/learner.wgsl");
+
+    this.learnPipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: learnShaderModule, entryPoint: 'main' }
+    });
+
+    this.learnBindGroup = this.device.createBindGroup({
+      layout: this.learnPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.cameraBuffer.buffer }
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.inputBuffer.buffer } 
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.gGradBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: { buffer: this.adamMBuffer.buffer } 
+        },
+        { 
+          binding: 4, 
+          resource: { buffer: this.adamVBuffer.buffer } 
+        },
+        { 
+          binding: 5, 
+          resource: { buffer: this.iteratorBuffer.buffer } 
+        },
+      ]
+    });
 
     const displayShaderModule = await this.loadShaderModule("src/shaders/display/display.wgsl");
 
@@ -449,7 +513,7 @@ class render extends core
       entries: [
         { 
           binding: 0,
-          resource: this.gradientTextureView
+          resource: this.renderTextureView
         },
         {
           binding: 1,
@@ -586,21 +650,21 @@ class render extends core
       floatView[offset + 0] = g.position.x;
       floatView[offset + 1] = g.position.y;
       floatView[offset + 2] = g.position.z;
+      floatView[offset + 3] = g.opacity;
       
-      floatView[offset + 3] = g.scale.x;
+      floatView[offset + 4] = g.scale.x;
+      floatView[offset + 5] = g.scale.y;
+      floatView[offset + 6] = g.scale.z;
+      uintView[offset + 7] = g.index;
       
-      floatView[offset + 4] = g.rotation.x;
-      floatView[offset + 5] = g.rotation.y;
-      floatView[offset + 6] = g.rotation.z;
-      floatView[offset + 7] = g.rotation.w;
-      floatView[offset + 8] = g.color.x;
-      floatView[offset + 9] = g.color.y;
-      floatView[offset + 10] = g.color.z;
-      floatView[offset + 11] = g.color.w;
-      
-      floatView[offset + 12] = g.opacity;
-      
-      uintView[offset + 13] = g.index;
+      floatView[offset + 8] = g.rotation.x;
+      floatView[offset + 9] = g.rotation.y;
+      floatView[offset + 10] = g.rotation.z;
+      floatView[offset + 11] = g.rotation.w;
+      floatView[offset + 12] = g.color.x;
+      floatView[offset + 13] = g.color.y;
+      floatView[offset + 14] = g.color.z;
+      floatView[offset + 15] = g.color.w;
     }
     await this.inputBuffer.updateArray(arrayBuffer);
   }
@@ -642,10 +706,12 @@ class render extends core
       
     await this.cameraBuffer.update(this.cameraData);
     await this.counterBuffer.updateInteger(new Uint32Array([0]));
+    await this.iteratorBuffer.updateInteger(new Uint32Array([this.IterationsCount]));
 
     this.commandEncoder.clearBuffer(this.tileBuffer.buffer);
     this.commandEncoder.clearBuffer(this.valuesBuffer.buffer);
     this.commandEncoder.clearBuffer(this.keysBuffer.buffer);
+    this.commandEncoder.clearBuffer(this.gGradBuffer.buffer);
     
     let tileSizex = Math.ceil(this.canvas.width / 16);
     let tileSizey = Math.ceil(this.canvas.height / 16);
@@ -656,6 +722,12 @@ class render extends core
     {
       await this.outputBuffer.resize(len * 16 * 4);
       await this.gGradBuffer.resize(len * 12 * 4);
+      await this.adamMBuffer.resize(len * 16 * 4);
+      await this.adamVBuffer.resize(len * 16 * 4);
+
+      this.gGradBuffer.isSizeChanged = false;
+      this.adamVBuffer.isSizeChanged = false;
+      this.adamMBuffer.isSizeChanged = false;
       this.inputBuffer.isSizeChanged = false;
       this.outputBuffer.isSizeChanged = false;
 
@@ -771,6 +843,37 @@ class render extends core
           },
         ]
       });
+
+      this.learnBindGroup = this.device.createBindGroup({
+        layout: this.learnPipeline.getBindGroupLayout(0),
+        entries: [
+          { 
+            binding: 0,
+            resource: { buffer: this.cameraBuffer.buffer }
+          },
+          { 
+            binding: 1, 
+            resource: { buffer: this.inputBuffer.buffer } 
+          },
+          { 
+            binding: 2, 
+            resource: { buffer: this.gGradBuffer.buffer } 
+          },
+          { 
+            binding: 3, 
+            resource: { buffer: this.adamMBuffer.buffer } 
+          },
+          { 
+            binding: 4, 
+            resource: { buffer: this.adamVBuffer.buffer } 
+          },
+          { 
+            binding: 5, 
+            resource: { buffer: this.iteratorBuffer.buffer } 
+          },
+        ]
+      });
+
     }
 
     this.computePassEncoder = this.commandEncoder.beginComputePass({});
@@ -928,6 +1031,7 @@ class render extends core
     this.radixSortKernel.dispatch(this.computePassEncoder);
 
     // Get tile ranges
+    // let perWorkgroupSize = Maththis.keysBuffer.bufferDesriptor.size / 12;
     this.computePassEncoder.setPipeline(this.tilePipeline);
     this.computePassEncoder.setBindGroup(0, this.tileBindGroup);
     this.computePassEncoder.dispatchWorkgroups(Math.floor((this.keysBuffer.bufferDesriptor.size / 4 + 255) / 256), 1, 1);
@@ -947,7 +1051,13 @@ class render extends core
     this.computePassEncoder.setPipeline(this.backwardPipeline);
     this.computePassEncoder.setBindGroup(0, this.backwardBindGroup);
     this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
+    
+    this.computePassEncoder.setPipeline(this.learnPipeline);
+    this.computePassEncoder.setBindGroup(0, this.learnBindGroup);
+    this.computePassEncoder.dispatchWorkgroups(Math.floor((len + 63) / this.workGroupSize), 1, 1);
     this.computePassEncoder.end();
+    
+    this.IterationsCount++;
   } /** End of 'drawLow' function */
 
   /**

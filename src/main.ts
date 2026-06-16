@@ -48,7 +48,7 @@ const init = async () => {
       new vec3(text[i].pos[0], text[i].pos[1], text[i].pos[2]),
       new vec3(text[i].scale, text[i].scale, text[i].scale),
       new vec4(0, 0, 0, 1),
-      0.6,
+      0.5,
       new vec4(text[i].color[0], text[i].color[1], text[i].color[2], text[i].color[3]),
     ));
     primitives[i].index = i;
@@ -110,6 +110,7 @@ const init = async () => {
 
   let flag = false;
 
+
   renderButton?.addEventListener('click', async (): Promise<void> => {
     flag = true;
   });
@@ -126,7 +127,7 @@ const init = async () => {
       rnd.controls.cam.set(loc, target, up);
     }
 
-    await rnd.end(flag);  
+    await rnd.end(true);  
     flag = false;
     window.requestAnimationFrame(draw);
   };

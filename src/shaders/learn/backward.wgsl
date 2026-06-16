@@ -156,7 +156,7 @@ fn main(
     C_after += data.color * alpha * transmittance;
 
     if (transmittance < 0.0001) { break; }
-    // loop_counter++;
-    // if (loop_counter > 50000) { break; }
+    loop_counter++;
+    if (loop_counter > 100000) { break; }
   }
 }

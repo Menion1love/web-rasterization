@@ -11,12 +11,11 @@ struct camData {
 
 struct gaussainData {
   position: vec3<f32>,
-  scale: f32,
+  opacity: f32,
+  scale: vec3<f32>,
+  index: u32,
   rotation: vec4<f32>,
   color: vec4<f32>,
-  opacity: f32,
-  index: u32,
-  padding: vec2<f32>,
 }
 
 struct rasterData {
@@ -100,12 +99,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
   let tz2 = t.z * t.z;
 
-  let cov_3d = compute_covariance(vec3<f32>(gs.scale), gs.rotation);
+  let cov_3d = compute_covariance(gs.scale, gs.rotation);
 
   let J = mat3x3<f32>(
     vec3<f32>(fx / t.z, 0, -(t.x * fx) / tz2),
     vec3<f32>(0, -fy / t.z, -(t.y * fy) / tz2),
-    vec3<f32>(0, 0, 0),
+    vec3<f32>(0, 0, 1.0),
   );
 
   let w = mat3x3<f32>(
