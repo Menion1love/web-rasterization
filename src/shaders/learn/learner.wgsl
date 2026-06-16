@@ -157,12 +157,14 @@ fn main(
 
   let dL_dM = 2.0 * dL_dSigma3D * M;
 
-  let dL_dS_mat = transpose(R) * dL_dM;
+  let dL_dS_mat = R * dL_dM;
 
   var dL_dScale = vec3f(0.0);
   dL_dScale.x = dL_dS_mat[0][0];
   dL_dScale.y = dL_dS_mat[1][1];
   dL_dScale.z = dL_dS_mat[2][2];
+
+  dL_dScale = -dL_dScale;
 
   var dL_dR = mat3x3f(
     dL_dM[0] * s.x,
@@ -198,6 +200,8 @@ fn main(
     qw * dL_dR[1][0] - 2.0 * qz * dL_dR[1][1] + qy * dL_dR[1][2] +
     qx * dL_dR[2][0] + qy * dL_dR[2][1]
   );
+  dL_dq = -1.0 * dL_dq; 
+
 
   let beta1 = 0.9;
   let beta2 = 0.999;
@@ -206,16 +210,13 @@ fn main(
   let bias_corr1 = 1.0 - pow(0.9, it);
   let bias_corr2 = 1.0 - pow(0.999, it);
 
-  let log_scale = log(s);
-  let dL_dLogScale = dL_dScale * exp(log_scale);
-
   adam_M[g_id].scale = beta1 * adam_M[g_id].scale + (1.0 - beta1) * dL_dScale;
   adam_V[g_id].scale = beta2 * adam_V[g_id].scale + (1.0 - beta2) * (dL_dScale * dL_dScale);
 
   let hat_M_scale = adam_M[g_id].scale / bias_corr1;
   let hat_V_scale = adam_V[g_id].scale / bias_corr2;
 
-  let lr_scale = 0.005;
+  let lr_scale = 0.0005;
   let lr_rotation = 0.005;
   let lr_color = 0.005;
   let lr_opacity = 0.005;
@@ -223,7 +224,7 @@ fn main(
 
   var new_scale = inputData[g_id].scale - lr_scale * hat_M_scale / (sqrt(hat_V_scale) + eps);
 
-  inputData[g_id].scale = new_scale;
+  inputData[g_id].scale = clamp(new_scale, vec3f(0.05), vec3f(1.5));
 
   adam_M[g_id].rotation = beta1 * adam_M[g_id].rotation + (1.0 - beta1) * dL_dq;
   adam_V[g_id].rotation = beta2 * adam_V[g_id].rotation + (1.0 - beta2) * (dL_dq * dL_dq);

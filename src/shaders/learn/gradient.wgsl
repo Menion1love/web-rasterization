@@ -32,7 +32,8 @@ fn main(
   let sh_y = i32(local_id.y) + 5;
 
   var sum_x  = vec3f(0.0); var sum_y  = vec3f(0.0);
-  var sum_x2 = vec3f(0.0); var sum_xy = vec3f(0.0);
+  var sum_x2 = vec3f(0.0); var sum_y2 = vec3f(0.0);
+  var sum_xy = vec3f(0.0);
 
   for (var dy = -5; dy <= 5; dy++) {
     for (var dx = -5; dx <= 5; dx++) {
@@ -42,6 +43,7 @@ fn main(
       sum_x  += r_color;
       sum_y  += t_color;
       sum_x2 += r_color * r_color;
+      sum_y2 += t_color * t_color; 
       sum_xy += r_color * t_color;
     }
   }
@@ -56,24 +58,25 @@ fn main(
   let mx = sum_x.r * w;
   let my = sum_y.r * w;
   let sx_sq = (sum_x2.r * w) - (mx * mx);
+  let sy_sq = (sum_y2.r * w) - (my * my);
   let sxy   = (sum_xy.r * w) - (mx * my);
 
   let A = 2.0 * mx * my + C1;
   let B = 2.0 * sxy + C2;
   let D = mx * mx + my * my + C1;
-  let E = sx_sq + C2;
+  let E = sx_sq + sy_sq + C2; 
 
   let d_num = 2.0 * my * B + 2.0 * (I_y.r - mx) * A;
   let d_den = 2.0 * mx * E + 2.0 * (I_x.r - mx) * D;
 
-  let dSSIM_dIx = w * ((d_num / (D * E)) - ((A * B * d_den) / ((D * D) * (E * E))));
+  let dSSIM_dIx = w * ((d_num * E - A * B * d_den / D) / (D * E * E)); 
     
   var dL_dI_dssim = vec3f(0.0);
   dL_dI_dssim.r = -0.5 * dSSIM_dIx;
   dL_dI_dssim.g = dL_dI_dssim.r; 
   dL_dI_dssim.b = dL_dI_dssim.r;
 
-  let dL_dI_l1 = sign(I_x - I_y);
+  let dL_dI_l1 = (I_x - I_y);
 
   let dL_dI_final = 0.8 * dL_dI_l1 + 0.2 * dL_dI_dssim;
 

@@ -467,7 +467,7 @@ class render extends core
     });
 
     const displayBindGroupLayout = this.device.createBindGroupLayout({
-      label: "Display Bind Group Layout (32Float)",
+      label: "Display Bind Group Layout",
       entries: [
         {
           binding: 0,
@@ -1044,14 +1044,17 @@ class render extends core
 
     this.computePassEncoder = this.commandEncoder.beginComputePass({});
     
+    // Gradients calculation
     this.computePassEncoder.setPipeline(this.gradientPipeline);
     this.computePassEncoder.setBindGroup(0, this.gradientBindGroup);
     this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
 
+    // Backward pass
     this.computePassEncoder.setPipeline(this.backwardPipeline);
     this.computePassEncoder.setBindGroup(0, this.backwardBindGroup);
     this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
     
+    // Learn pass 
     this.computePassEncoder.setPipeline(this.learnPipeline);
     this.computePassEncoder.setBindGroup(0, this.learnBindGroup);
     this.computePassEncoder.dispatchWorkgroups(Math.floor((len + 63) / this.workGroupSize), 1, 1);

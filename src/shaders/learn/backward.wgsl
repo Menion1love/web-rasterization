@@ -157,6 +157,6 @@ fn main(
 
     if (transmittance < 0.0001) { break; }
     loop_counter++;
-    if (loop_counter > 100000) { break; }
+    // if (loop_counter > 100000) { break; }
   }
 }
