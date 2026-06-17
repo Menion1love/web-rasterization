@@ -5,6 +5,9 @@ import { input } from "./input/input.ts"
 import { vec3 } from "./mth/mth_vec3.ts"
 import { vec4 } from "./mth/mth_vec4.ts"
 
+/** Convert degrees to radians */
+const d2R = (rad: number): number => rad * Math.PI / 180;
+
 const init = async () => {
   let canvasId = document.querySelector("#webgpu-canvas");
   let rnd = new render();
@@ -21,7 +24,7 @@ const init = async () => {
     const targetH = rnd.canvas.height;
 
     // const Path = `bin/images/${cam[curCam].name}`;
-    const Path = `bin/images/true.png`;
+    const Path = `bin/images/true1.png`;
 
     const response = await fetch(Path);
     const blob = await response.blob();
@@ -39,6 +42,7 @@ const init = async () => {
       { texture: rnd.imageTexture },
       [imageBitmap.width, imageBitmap.height] 
     );
+    
     rnd.imageTextureView = rnd.imageTexture.createView();
     rnd.reload();
 
@@ -54,7 +58,9 @@ const init = async () => {
   //   ));
   //   primitives[i].index = i;
   // }
-  load();
+  await load();
+
+
 
     // primitives.push(new primitive(
     //     new vec3(0),
@@ -71,24 +77,32 @@ const init = async () => {
     //     0.9,
     //     new vec4(0, 0, 1, 1),
     //   ));
+  
+    // True1 png params
+    // primitives.push(new primitive(
+    //     new vec3(0),
+    //     new vec3(0.8, 0.6, 0.4),
+    //     new vec4(0.0, 0.0, 0.6, 1),
+    //     0.8,
+    //     new vec4(1, 0, 1, 1),
+    //   ));
 
     primitives.push(new primitive(
         new vec3(0),
-        new vec3(0.4, 0.4, 0.4),
-        new vec4(0, 0, 0, 1),
+        new vec3(0.8, 0.6, 0.4),
+        new vec4(0.0, 0.0, 0.6, 1),
         0.8,
         new vec4(1, 0, 1, 1),
       ));
 
-    primitives.push(new primitive(
-        new vec3(1),
-        new vec3(0.2, 0.2, 0.2),
-        new vec4(0, 0, 0, 1),
-        0.9,
-        new vec4(0, 0, 0.3, 1),
-      ));
+    // primitives.push(new primitive(
+    //     new vec3(1),
+    //     new vec3(0.2, 0.2, 0.2),
+    //     new vec4(0, 0, 0, 1),
+    //     0.9,
+    //     new vec4(0, 0, 1.0, 1),
+    //   ));
 
-  rnd.attachToDraw(primitives);
   const prevButton = document.getElementById('prevBtn') as HTMLButtonElement;
   const nextButton = document.getElementById('nextBtn') as HTMLButtonElement;
   const valueDisplay = document.getElementById('counterValue') as HTMLSpanElement;
@@ -123,8 +137,20 @@ const init = async () => {
     flag = true;
   });
 
+  rnd.attachToDraw(primitives);
+  
   const draw = async () => {
     rnd.start();
+    // primitives[0].rotation = new vec4(Math.sin(timer.time), 0, 0, 1);
+
+    // primitives.push(new primitive(
+    //     new vec3(1),
+    //     new vec3(0.2, 0.2, 0.2),
+    //     new vec4(0, 0, 0, 1),
+    //     0.9,
+    //     new vec4(0, 0, 1.0, 1),
+    //   ));
+
 
     // if (cam.length > 0)
     // {
@@ -137,6 +163,7 @@ const init = async () => {
 
     await rnd.end(true);  
     flag = false;
+    //rnd.primsClear();
     window.requestAnimationFrame(draw);
   };
   draw();

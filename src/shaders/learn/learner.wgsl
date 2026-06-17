@@ -48,9 +48,9 @@ struct GaussianGradients {
 fn quaternion_to_matrix(q_input: vec4<f32>) -> mat3x3<f32> {
   let q = normalize(q_input);
   
-  let x = q.x;
+  let x = q.z;
   let y = q.y;
-  let z = q.z;
+  let z = q.x;
   let w = q.w;
 
   let xx = x * x;
@@ -65,11 +65,11 @@ fn quaternion_to_matrix(q_input: vec4<f32>) -> mat3x3<f32> {
   let wy = w * y;
   let wz = w * z;
 
-  return transpose(mat3x3<f32>(
+  return mat3x3<f32>(
       vec3<f32>(1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz),       2.0 * (xz - wy)),
       vec3<f32>(2.0 * (xy - wz),       1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx)),
       vec3<f32>(2.0 * (xz + wy),       2.0 * (yz - wx),       1.0 - 2.0 * (xx + yy))
-  ));
+  );
 }
 
 @compute @workgroup_size(256, 1, 1)
@@ -109,18 +109,19 @@ fn main(
   let tz2 = t.z * t.z;
   let J_00 = fx / t.z;
   let J_01 = 0.0;
-  let J_02 = -(t.z * fx) / tz2;
+  let J_02 = -(t.x * fx) / tz2;
 
   let J_10 = 0.0;
   let J_11 = -fy / t.z;
-  let J_12 = -(t.y * fy) / tz2;
+  let J_12 = (t.y * fy) / tz2;
 
   var dL_dxyz_camera = vec3f(0.0);
   dL_dxyz_camera.x = dL_dcenter_2d.x * J_00 + dL_dcenter_2d.y * J_10;
   dL_dxyz_camera.y = dL_dcenter_2d.x * J_01 + dL_dcenter_2d.y * J_11;
   dL_dxyz_camera.z = dL_dcenter_2d.x * J_02 + dL_dcenter_2d.y * J_12;
 
-  let dL_dxyz_world = transpose(camera.view) * vec4<f32>(dL_dxyz_camera, 1.0);
+  let R_cam = mat3x3f(camera.view[0].xyz, camera.view[1].xyz, camera.view[2].xyz);
+  let dL_dxyz_world = R_cam * dL_dxyz_camera;
 
   let dL_da = dL_dcov_2d.x;
   let dL_db = dL_dcov_2d.y;
@@ -164,7 +165,7 @@ fn main(
   dL_dScale.y = dL_dS_mat[1][1];
   dL_dScale.z = dL_dS_mat[2][2];
 
-  dL_dScale = -dL_dScale;
+  dL_dScale = dL_dScale;
 
   var dL_dR = mat3x3f(
     dL_dM[0] * s.x,
@@ -173,34 +174,39 @@ fn main(
   );
 
   let q = gs.rotation;
-  let qw = q.x; let qx = q.y; let qy = q.z; let qz = q.w; 
+  let qw = q.w; let qx = q.x; let qy = q.y; let qz = q.z; 
 
-  var dL_dq = vec4f(0.0);
-
-  dL_dq.x = 2.0 * (
+  let dL_dx_local = 2.0 * (
     -qy * dL_dR[0][1] + qz * dL_dR[0][2] +
-    qy * dL_dR[1][0] - qx * dL_dR[1][2] -
-    qz * dL_dR[2][0] + qx * dL_dR[2][1]
+     qy * dL_dR[1][0] - qx * dL_dR[1][2] -
+     qz * dL_dR[2][0] + qx * dL_dR[2][1]
   );
 
-  dL_dq.y = 2.0 * (
-    qy * dL_dR[0][1] + qz * dL_dR[0][2] +
-    qy * dL_dR[1][0] - 2.0 * qx * dL_dR[1][1] - qw * dL_dR[1][2] +
-    qz * dL_dR[2][0] + qw * dL_dR[2][1] - 2.0 * qx * dL_dR[2][2]
+  let dL_dy_local = 2.0 * (
+     qy * dL_dR[0][1] + qz * dL_dR[0][2] +
+     qy * dL_dR[1][0] - 2.0 * qx * dL_dR[1][1] - qw * dL_dR[1][2] +
+     qz * dL_dR[2][0] + qw * dL_dR[2][1] - 2.0 * qx * dL_dR[2][2]
   );
 
-  dL_dq.z = 2.0 * (
+  let dL_dz_local = 2.0 * (
     -2.0 * qy * dL_dR[0][0] + qx * dL_dR[0][1] + qw * dL_dR[0][2] +
-    qx * dL_dR[1][0] -
+     qx * dL_dR[1][0] - 2.0 * qz * dL_dR[1][1] - qw * dL_dR[1][2] +
     -qw * dL_dR[2][0] + qz * dL_dR[2][1] - 2.0 * qy * dL_dR[2][2]
   );
 
-  dL_dq.w = 2.0 * (
+  let dL_dw_local = 2.0 * (
     -2.0 * qz * dL_dR[0][0] - qw * dL_dR[0][1] + qx * dL_dR[0][2] +
-    qw * dL_dR[1][0] - 2.0 * qz * dL_dR[1][1] + qy * dL_dR[1][2] +
-    qx * dL_dR[2][0] + qy * dL_dR[2][1]
+     qw * dL_dR[1][0] - 2.0 * qz * dL_dR[1][1] + qy * dL_dR[1][2] +
+     qx * dL_dR[2][0] + qy * dL_dR[2][1]
   );
-  dL_dq = -1.0 * dL_dq; 
+
+  var dL_dq = vec4f(0.0);
+  dL_dq.x = dL_dz_local; 
+  dL_dq.y = dL_dy_local; 
+  dL_dq.z = dL_dx_local; 
+  dL_dq.w = dL_dw_local; 
+
+  // dL_dq = -1.0 * dL_dq; 
 
 
   let beta1 = 0.9;
@@ -210,13 +216,13 @@ fn main(
   let bias_corr1 = 1.0 - pow(0.9, it);
   let bias_corr2 = 1.0 - pow(0.999, it);
 
-  adam_M[g_id].scale = beta1 * adam_M[g_id].scale + (1.0 - beta1) * dL_dScale;
-  adam_V[g_id].scale = beta2 * adam_V[g_id].scale + (1.0 - beta2) * (dL_dScale * dL_dScale);
+  adam_M[g_id].scale = /* beta1 * adam_M[g_id].scale + */(1.0 - beta1) * dL_dScale;
+  adam_V[g_id].scale = /* beta2 * adam_V[g_id].scale + */(1.0 - beta2) * (dL_dScale * dL_dScale);
 
   let hat_M_scale = adam_M[g_id].scale / bias_corr1;
   let hat_V_scale = adam_V[g_id].scale / bias_corr2;
 
-  let lr_scale = 0.0005;
+  let lr_scale = 0.005;
   let lr_rotation = 0.005;
   let lr_color = 0.005;
   let lr_opacity = 0.005;
@@ -224,17 +230,21 @@ fn main(
 
   var new_scale = inputData[g_id].scale - lr_scale * hat_M_scale / (sqrt(hat_V_scale) + eps);
 
-  inputData[g_id].scale = clamp(new_scale, vec3f(0.05), vec3f(1.5));
+  inputData[g_id].scale = new_scale;
 
-  adam_M[g_id].rotation = beta1 * adam_M[g_id].rotation + (1.0 - beta1) * dL_dq;
-  adam_V[g_id].rotation = beta2 * adam_V[g_id].rotation + (1.0 - beta2) * (dL_dq * dL_dq);
+  adam_M[g_id].rotation = vec4f(0.0);//beta1 * adam_M[g_id].rotation + (1.0 - beta1) * dL_dq;
+  adam_V[g_id].rotation = vec4f(0.0);//beta2 * adam_V[g_id].rotation + (1.0 - beta2) * (dL_dq * dL_dq);
 
   let hat_M_rot = adam_M[g_id].rotation / bias_corr1;
   let hat_V_rot = adam_V[g_id].rotation / bias_corr2;
 
   var new_rot = inputData[g_id].rotation - lr_rotation * hat_M_rot / (sqrt(hat_V_rot) + eps);
 
-  inputData[g_id].rotation = normalize(new_rot); 
+  var normalized_rot = normalize(new_rot);
+  if (normalized_rot.w < 0.0) {
+    normalized_rot = -normalized_rot;
+  }
+  inputData[g_id].rotation = normalized_rot;
   // adam_M[g_id].color = vec4f(beta1 * adam_M[g_id].color.xyz + (1.0 - beta1) * dL_dcolor, 1.0);
   // adam_V[g_id].color = vec4f(beta2 * adam_V[g_id].color.xyz + (1.0 - beta2) * (dL_dcolor * dL_dcolor), 1.0);
 

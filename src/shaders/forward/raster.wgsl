@@ -29,7 +29,7 @@ struct tailData {
 @group(0) @binding(1) var<storage, read> inputData: array<rasterData>;
 @group(0) @binding(2) var<storage, read_write> valuesBuffer: array<u32>;
 @group(0) @binding(3) var<storage, read_write> tail_ranges: array<tailData>;
-@group(0) @binding(4) var tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(4) var tex: texture_storage_2d<rgba32float, write>;
 @group(0) @binding(5) var tex_t: texture_storage_2d<r32float, write>;
 
 @compute @workgroup_size(16, 16, 1)

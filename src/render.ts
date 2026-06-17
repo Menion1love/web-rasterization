@@ -61,8 +61,8 @@ class render extends core
   private commandEncoder!: GPUCommandEncoder | null;
   private passEncoder!: GPURenderPassEncoder | null;
   private computePassEncoder!: GPUComputePassEncoder | null;
-  private renderTexture!: GPUTexture | null;
-  private renderTextureView!: GPUTextureView | null;
+  public renderTexture!: GPUTexture | null;
+  public renderTextureView!: GPUTextureView | null;
 
   private radixSortKernel!: RadixSortKernel;
   private workGroupSize = 64;
@@ -118,14 +118,14 @@ class render extends core
 
     this.renderTexture = this.device.createTexture({
       size: [this.canvas.width, this.canvas.height], 
-      format: 'rgba8unorm', 
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE_BINDING  
+      format: 'rgba32float', 
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE_BINDING  
     });
     this.renderTextureView = this.renderTexture.createView();
 
     this.imageTexture = this.device.createTexture({
       size: [this.canvas.width, this.canvas.height], 
-      format: 'rgba8unorm', 
+      format: 'rgba32float', 
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.STORAGE_BINDING  
     });
 
@@ -513,7 +513,7 @@ class render extends core
       entries: [
         { 
           binding: 0,
-          resource: this.renderTextureView
+          resource: this.gradientTextureView
         },
         {
           binding: 1,
@@ -724,6 +724,9 @@ class render extends core
       await this.gGradBuffer.resize(len * 12 * 4);
       await this.adamMBuffer.resize(len * 16 * 4);
       await this.adamVBuffer.resize(len * 16 * 4);
+      this.commandEncoder.clearBuffer(this.adamMBuffer.buffer);
+      this.commandEncoder.clearBuffer(this.adamVBuffer.buffer);
+      this.commandEncoder.clearBuffer(this.gGradBuffer.buffer);
 
       this.gGradBuffer.isSizeChanged = false;
       this.adamVBuffer.isSizeChanged = false;
@@ -1074,7 +1077,8 @@ class render extends core
     if (flag)
     {
       const clearPassDescriptor: GPURenderPassDescriptor = {
-        colorAttachments: [{
+        colorAttachments: [
+          {
           view: this.renderTextureView, 
           clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
           loadOp: 'clear',

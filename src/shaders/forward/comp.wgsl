@@ -37,9 +37,9 @@ struct rasterData {
 fn quaternion_to_matrix(q_input: vec4<f32>) -> mat3x3<f32> {
   let q = normalize(q_input);
   
-  let x = q.x;
+  let x = q.z;
   let y = q.y;
-  let z = q.z;
+  let z = q.x;
   let w = q.w;
 
   let xx = x * x;
@@ -54,20 +54,20 @@ fn quaternion_to_matrix(q_input: vec4<f32>) -> mat3x3<f32> {
   let wy = w * y;
   let wz = w * z;
 
-  return transpose(mat3x3<f32>(
+  return mat3x3<f32>(
       vec3<f32>(1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz),       2.0 * (xz - wy)),
       vec3<f32>(2.0 * (xy - wz),       1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx)),
       vec3<f32>(2.0 * (xz + wy),       2.0 * (yz - wx),       1.0 - 2.0 * (xx + yy))
-  ));
+  );
 }
 
 fn compute_covariance(s: vec3<f32>, r: vec4<f32>) -> mat3x3<f32> {
   let R = quaternion_to_matrix(r);
 
   var M: mat3x3<f32>;
-  M[0] = R[0] * s.x; 
+  M[0] = R[0] * s.z; 
   M[1] = R[1] * s.y; 
-  M[2] = R[2] * s.z; 
+  M[2] = R[2] * s.x; 
 
   return M * transpose(M);
 }
@@ -107,7 +107,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     vec3<f32>(0, 0, 1.0),
   );
 
-  let w = mat3x3<f32>(
+  var w = mat3x3<f32>(
     camera.view[0].xyz,
     camera.view[1].xyz,
     camera.view[2].xyz

@@ -76,9 +76,21 @@ fn main(
   dL_dI_dssim.g = dL_dI_dssim.r; 
   dL_dI_dssim.b = dL_dI_dssim.r;
 
-  let dL_dI_l1 = (I_x - I_y);
+ let diff = I_x - I_y;
 
-  let dL_dI_final = 0.8 * dL_dI_l1 + 0.2 * dL_dI_dssim;
+  let l1_threshold = 0.0025; 
+  
+  var safe_diff = vec3f(0.0);
+  if (abs(diff.r) > l1_threshold) { safe_diff.r = diff.r; }
+  if (abs(diff.g) > l1_threshold) { safe_diff.g = diff.g; }
+  if (abs(diff.b) > l1_threshold) { safe_diff.b = diff.b; }
+
+  let dL_dI_l1 = clamp(safe_diff * 10.0, vec3f(-1.0), vec3f(1.0));
+  var dL_dI_final = 0.8 * dL_dI_l1 + 0.2 * dL_dI_dssim; 
+  
+  if (all(abs(diff) <= vec3f(l1_threshold))) {
+    dL_dI_final = vec3f(0.0);
+  }
 
   textureStore(tex_final_gradients, vec2i(global_id.xy), vec4f(dL_dI_final, 1.0));
 }
