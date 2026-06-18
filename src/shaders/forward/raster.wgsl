@@ -82,7 +82,7 @@ fn main(@builtin(workgroup_id) workgroup_id : vec3<u32>, @builtin(local_invocati
     transmittance *= (1.0 - alpha);
     
     if (transmittance < 0.0001) {
-        break;
+      break;
     }
   }
   

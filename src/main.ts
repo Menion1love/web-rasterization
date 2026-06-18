@@ -13,8 +13,8 @@ const init = async () => {
   let rnd = new render();
   await rnd.init(canvasId as HTMLElement);
   let primitives: primitive[] = [];
-  let js = await fetch("./bin/points.json");
-  let jscam = await fetch("./bin/cam.json");
+  let js = await fetch("./bin/gaussians.json");
+  let jscam = await fetch("./bin/cam1.json");
   let text = await js.json();
   let cam = await jscam.json();
   let curCam = 0;
@@ -23,8 +23,8 @@ const init = async () => {
     const targetW = rnd.canvas.width;
     const targetH = rnd.canvas.height;
 
-    // const Path = `bin/images/${cam[curCam].name}`;
-    const Path = `bin/images/true1.png`;
+    const Path = `bin/images/${cam[curCam].name}`;
+    // const Path = `bin/images/true.png`;
 
     const response = await fetch(Path);
     const blob = await response.blob();
@@ -48,16 +48,16 @@ const init = async () => {
 
   }
 
-  // for (let i = 0; i < text.length; i++) {
-  //   primitives.push(new primitive(
-  //     new vec3(text[i].pos[0], text[i].pos[1], text[i].pos[2]),
-  //     new vec3(text[i].scale, text[i].scale, text[i].scale),
-  //     new vec4(0, 0, 0, 1),
-  //     0.5,
-  //     new vec4(text[i].color[0], text[i].color[1], text[i].color[2], text[i].color[3]),
-  //   ));
-  //   primitives[i].index = i;
-  // }
+  for (let i = 0; i < text.length; i++) {
+    primitives.push(new primitive(
+      new vec3(text[i].pos[0], text[i].pos[1], text[i].pos[2]),
+      new vec3(0.1, 0.1, 0.1),
+      new vec4(0, 0, 0, 1),
+      0.6,
+      new vec4(text[i].color[0], text[i].color[1], text[i].color[2], text[i].color[3]),
+    ));
+    primitives[i].index = i;
+  }
   await load();
 
 
@@ -87,13 +87,13 @@ const init = async () => {
     //     new vec4(1, 0, 1, 1),
     //   ));
 
-    primitives.push(new primitive(
-        new vec3(0),
-        new vec3(0.8, 0.6, 0.4),
-        new vec4(0.0, 0.0, 0.6, 1),
-        0.8,
-        new vec4(1, 0, 1, 1),
-      ));
+    // primitives.push(new primitive(
+    //     new vec3(0),
+    //     new vec3(0.2, 0.2, 0.01),
+    //     new vec4(0.0, 0.0, 0.0, 1),
+    //     0.8,
+    //     new vec4(1, 0, 1, 1),
+    //   ));
 
     // primitives.push(new primitive(
     //     new vec3(1),
@@ -152,14 +152,14 @@ const init = async () => {
     //   ));
 
 
-    // if (cam.length > 0)
-    // {
-    //   let loc = new vec3(cam[curCam].loc[0], cam[curCam].loc[1], cam[curCam].loc[2]);
-    //   let at = new vec3(cam[curCam].at[0], cam[curCam].at[1], cam[curCam].at[2]);
-    //   let up = new vec3(cam[curCam].up[0], cam[curCam].up[1], cam[curCam].up[2]);
-    //   let target = at.add(loc);
-    //   rnd.controls.cam.set(loc, target, up);
-    // }
+    if (cam.length > 0)
+    {
+      let loc = new vec3(cam[curCam].loc[0], cam[curCam].loc[1], cam[curCam].loc[2]);
+      let at = new vec3(cam[curCam].at[0], cam[curCam].at[1], cam[curCam].at[2]);
+      let up = new vec3(cam[curCam].up[0], cam[curCam].up[1], cam[curCam].up[2]);
+      let target = at.add(loc);
+      rnd.controls.cam.set(loc, target, up);
+    }
 
     await rnd.end(true);  
     flag = false;

@@ -119,7 +119,7 @@ class render extends core
     this.renderTexture = this.device.createTexture({
       size: [this.canvas.width, this.canvas.height], 
       format: 'rgba32float', 
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE_BINDING  
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING  
     });
     this.renderTextureView = this.renderTexture.createView();
 
@@ -134,7 +134,7 @@ class render extends core
     this.gradientTexture = this.device.createTexture({
       size: [this.canvas.width, this.canvas.height], 
       format: 'rgba32float', 
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE_BINDING  
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING  
     });
 
     this.gradientTextureView = this.gradientTexture.createView();
@@ -142,7 +142,7 @@ class render extends core
     this.transmittanceTexture = this.device.createTexture({
       size: [this.canvas.width, this.canvas.height], 
       format: 'r32float', 
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE_BINDING  
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING  
     });
 
     this.transmittanceTextureView = this.transmittanceTexture.createView();
@@ -197,7 +197,7 @@ class render extends core
     })
 
     this.outputBuffer.create({
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      usage: GPUBufferUsage.STORAGE,
       size: 64,
       label: "output",
     });
@@ -511,9 +511,13 @@ class render extends core
     this.displayBindGroup = this.device.createBindGroup({
       layout: displayBindGroupLayout,
       entries: [
+        // { 
+        //   binding: 0,
+        //   resource: this.gradientTextureView
+        // },
         { 
           binding: 0,
-          resource: this.gradientTextureView
+          resource: this.renderTextureView
         },
         {
           binding: 1,
@@ -834,7 +838,7 @@ class render extends core
           },
           { 
             binding: 4, 
-            resource: this.renderTextureView 
+            resource: this.gradientTextureView 
           },
           { 
             binding: 5, 
@@ -995,7 +999,7 @@ class render extends core
           },
           { 
             binding: 4, 
-            resource: this.renderTextureView 
+            resource: this.gradientTextureView 
           },
           { 
             binding: 5, 

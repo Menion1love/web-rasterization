@@ -104,7 +104,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let J = mat3x3<f32>(
     vec3<f32>(fx / t.z, 0, -(t.x * fx) / tz2),
     vec3<f32>(0, -fy / t.z, -(t.y * fy) / tz2),
-    vec3<f32>(0, 0, 1.0),
+    vec3<f32>(0, 0, 0.0),
   );
 
   var w = mat3x3<f32>(
