@@ -66,7 +66,7 @@ fn main(
   let D = mx * mx + my * my + C1;
   let E = sx_sq + sy_sq + C2; 
 
-  let d_num = 2.0 * my * B + 2.0 * (I_y.r - mx) * A;
+  let d_num = 2.0 * my * B + 2.0 * (I_y.r - my) * A;
   let d_den = 2.0 * mx * E + 2.0 * (I_x.r - mx) * D;
 
   let dSSIM_dIx = w * ((d_num * E - A * B * d_den / D) / (D * E * E)); 

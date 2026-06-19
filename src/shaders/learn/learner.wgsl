@@ -113,7 +113,7 @@ fn main(
 
   let J_10 = 0.0;
   let J_11 = -fy / t.z;
-  let J_12 = -(t.y * fy) / tz2;
+  let J_12 = (t.y * fy) / tz2;
 
   var dL_dxyz_camera = vec3f(0.0);
   dL_dxyz_camera.x = dL_dcenter_2d.x * J_00 + dL_dcenter_2d.y * J_10;
@@ -121,7 +121,7 @@ fn main(
   dL_dxyz_camera.z = dL_dcenter_2d.x * J_02 + dL_dcenter_2d.y * J_12;
 
   let R_cam = mat3x3f(camera.view[0].xyz, camera.view[1].xyz, camera.view[2].xyz);
-  let dL_dxyz_world = R_cam * dL_dxyz_camera;
+  let dL_dxyz_world = transpose(R_cam) * dL_dxyz_camera;
 
   let dL_da = dL_dcov_2d.x;
   let dL_db = dL_dcov_2d.y;
@@ -172,28 +172,28 @@ fn main(
   let q = gs.rotation;
   let qw = q.w; let qx = q.z; let qy = q.y; let qz = q.x; 
 
-  let dL_dx_local = 2.0 * (
-    -qy * dL_dR[0][1] + qz * dL_dR[0][2] +
-     qy * dL_dR[1][0] - qx * dL_dR[1][2] -
-     qz * dL_dR[2][0] + qx * dL_dR[2][1]
+  let dL_dz_local = 2.0 * (
+    -2.0 * qz * dL_dR[0][0] - qw * dL_dR[1][0] + qx * dL_dR[2][0]
+    + qw * dL_dR[0][1] - 2.0 * qz * dL_dR[1][1] + qy * dL_dR[2][1]
+    + qx * dL_dR[0][2] + qy * dL_dR[1][2]
   );
 
   let dL_dy_local = 2.0 * (
-     qy * dL_dR[0][1] + qz * dL_dR[0][2] +
-     qy * dL_dR[1][0] - 2.0 * qx * dL_dR[1][1] - qw * dL_dR[1][2] +
-     qz * dL_dR[2][0] + qw * dL_dR[2][1] - 2.0 * qx * dL_dR[2][2]
+    -2.0 * qy * dL_dR[0][0] + qx * dL_dR[1][0] + qw * dL_dR[2][0]
+    + qx * dL_dR[0][1] + qz * dL_dR[2][1]
+    - qw * dL_dR[0][2] + qz * dL_dR[1][2] - 2.0 * qy * dL_dR[2][2]
   );
 
-  let dL_dz_local = 2.0 * (
-    -2.0 * qy * dL_dR[0][0] + qx * dL_dR[0][1] + qw * dL_dR[0][2] +
-     qx * dL_dR[1][0] - 2.0 * qz * dL_dR[1][1] - qw * dL_dR[1][2] +
-    -qw * dL_dR[2][0] + qz * dL_dR[2][1] - 2.0 * qy * dL_dR[2][2]
+  let dL_dx_local = 2.0 * (
+    qy * dL_dR[1][0] + qz * dL_dR[2][0]
+    + qy * dL_dR[0][1] - 4.0 * qx * dL_dR[1][1] - qw * dL_dR[2][1]
+    + qz * dL_dR[0][2] + qw * dL_dR[1][2] - 4.0 * qx * dL_dR[2][2]
   );
 
   let dL_dw_local = 2.0 * (
-    -2.0 * qz * dL_dR[0][0] - qw * dL_dR[0][1] + qx * dL_dR[0][2] +
-     qw * dL_dR[1][0] - 2.0 * qz * dL_dR[1][1] + qy * dL_dR[1][2] +
-     qx * dL_dR[2][0] + qy * dL_dR[2][1]
+    -qz * dL_dR[1][0] + qy * dL_dR[2][0]
+    + qz * dL_dR[0][1] - qx * dL_dR[2][1]
+    - qy * dL_dR[0][2] + qx * dL_dR[1][2]
   );
 
   var dL_dq = vec4f(0.0);
@@ -222,11 +222,10 @@ fn main(
   let lr_rotation = 0.005;
   let lr_color = 0.005;
   let lr_opacity = 0.005;
-  let lr_xyz = 0.005;
+  let lr_xyz = 0.00005;
 
   var new_scale = inputData[g_id].scale - lr_scale * hat_M_scale / (sqrt(hat_V_scale) + eps);
-
-  inputData[g_id].scale = new_scale;
+  inputData[g_id].scale = max(new_scale, vec3f(1e-5));
 
   adam_M[g_id].rotation = beta1 * adam_M[g_id].rotation + (1.0 - beta1) * dL_dq;
   adam_V[g_id].rotation = beta2 * adam_V[g_id].rotation + (1.0 - beta2) * (dL_dq * dL_dq);
@@ -243,15 +242,15 @@ fn main(
   // }
 
   inputData[g_id].rotation = normalized_rot;
-  // adam_M[g_id].color = vec4f(beta1 * adam_M[g_id].color.xyz + (1.0 - beta1) * dL_dcolor, 1.0);
-  // adam_V[g_id].color = vec4f(beta2 * adam_V[g_id].color.xyz + (1.0 - beta2) * (dL_dcolor * dL_dcolor), 1.0);
-  
-  // let hat_M_col = adam_M[g_id].color / bias_corr1;
-  // let hat_V_col = adam_V[g_id].color / bias_corr2;
-  
-  // var new_color = inputData[g_id].color - lr_color * hat_M_col / (sqrt(hat_V_col) + eps);
-  
-  // inputData[g_id].color = vec4<f32>(clamp(new_color.xyz, vec3f(0.0), vec3f(1.0)), 1.0);
+  adam_M[g_id].color = vec4f(beta1 * adam_M[g_id].color.xyz + (1.0 - beta1) * dL_dcolor, 1.0);
+  adam_V[g_id].color = vec4f(beta2 * adam_V[g_id].color.xyz + (1.0 - beta2) * (dL_dcolor * dL_dcolor), 1.0);
+
+  let hat_M_col = adam_M[g_id].color / bias_corr1;
+  let hat_V_col = adam_V[g_id].color / bias_corr2;
+
+  var new_color = inputData[g_id].color - lr_color * hat_M_col / (sqrt(hat_V_col) + eps);
+
+  inputData[g_id].color = vec4<f32>(clamp(new_color.xyz, vec3f(0.0), vec3f(1.0)), 1.0);
   
   adam_M[g_id].opacity = beta1 * adam_M[g_id].opacity + (1.0 - beta1) * dL_dopacity;
   adam_V[g_id].opacity = beta2 * adam_V[g_id].opacity + (1.0 - beta2) * (dL_dopacity * dL_dopacity);
@@ -263,11 +262,11 @@ fn main(
   
   inputData[g_id].opacity = clamp(new_opacity, 0.0, 0.99);
 
-  // adam_M[g_id].position = beta1 * adam_M[g_id].position + (1.0 - beta1) * dL_dxyz_world.xyz;
-  // adam_V[g_id].position = beta2 * adam_V[g_id].position + (1.0 - beta2) * (dL_dxyz_world.xyz * dL_dxyz_world.xyz);
+  adam_M[g_id].position = beta1 * adam_M[g_id].position + (1.0 - beta1) * dL_dxyz_world.xyz;
+  adam_V[g_id].position = beta2 * adam_V[g_id].position + (1.0 - beta2) * (dL_dxyz_world.xyz * dL_dxyz_world.xyz);
 
-  // let hat_M_xyz = adam_M[g_id].position / bias_corr1;
-  // let hat_V_xyz = adam_V[g_id].position / bias_corr2;
+  let hat_M_xyz = adam_M[g_id].position / bias_corr1;
+  let hat_V_xyz = adam_V[g_id].position / bias_corr2;
 
-  // inputData[g_id].position -= lr_xyz * hat_M_xyz / (sqrt(hat_V_xyz) + eps);
+  inputData[g_id].position -= lr_xyz * hat_M_xyz / (sqrt(hat_V_xyz) + eps);
 }

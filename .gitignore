@@ -26,17 +26,17 @@ Thumbs.db
 # Images and photos
 **/*.jpg
 **/*.jpeg
-# **/*.png
+**/*.png
 **/*.bmp
 **/*.webp
 **/*.raw
 # images/
-# **/images/
+**/images/
 
 # Logs
 *.log
 logs/
-
+    
 # Temporary files
 tmp/
 temp/

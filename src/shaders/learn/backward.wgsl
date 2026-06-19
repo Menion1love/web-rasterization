@@ -117,7 +117,7 @@ fn main(
 
     let dL_dcolor = dL_dI * alpha * transmittance;
 
-    let dL_dalpha_vector = dL_dI * (data.color * transmittance - C_after);
+    let dL_dalpha_vector = dL_dI * (data.color - C_after) * transmittance;
     let dL_dalpha: f32 = dL_dalpha_vector.r + dL_dalpha_vector.g + dL_dalpha_vector.b;
 
     let dL_dopacity = dL_dalpha * exp(power);
@@ -131,14 +131,16 @@ fn main(
     let dL_dinv_cov_01 = -1.0 * d.x * d.y * dL_dpower;
     let dL_dinv_cov_11 = -0.5 * d.y * d.y * dL_dpower;
 
-    let dL_da = -inv_cov_00 * (dL_dinv_cov_00 * inv_cov_00 + dL_dinv_cov_01 * inv_cov_01) 
-                - inv_cov_01 * (dL_dinv_cov_01 * inv_cov_00 + dL_dinv_cov_11 * inv_cov_01);
+    let dL_da = -(inv_cov_00 * inv_cov_00 * dL_dinv_cov_00 + inv_cov_00 * inv_cov_01 * dL_dinv_cov_01  
+                + inv_cov_01*inv_cov_01 * dL_dinv_cov_11);
 
-    let dL_dc = -inv_cov_01 * (dL_dinv_cov_00 * inv_cov_01 + dL_dinv_cov_01 * inv_cov_11) 
-                - inv_cov_11 * (dL_dinv_cov_01 * inv_cov_01 + dL_dinv_cov_11 * inv_cov_11);
+    let dL_dc = -(inv_cov_01 * inv_cov_01 * dL_dinv_cov_00 
+                + inv_cov_01 * inv_cov_11 * dL_dinv_cov_01 
+                + inv_cov_11 * inv_cov_11 * dL_dinv_cov_11);
 
-    let dL_db = -2.0 * (inv_cov_00 * (dL_dinv_cov_00 * inv_cov_01 + dL_dinv_cov_01 * inv_cov_11) 
-                      + inv_cov_01 * (dL_dinv_cov_01 * inv_cov_01 + dL_dinv_cov_11 * inv_cov_11));
+    let dL_db = -2.0 * inv_cov_00 * inv_cov_01 * dL_dinv_cov_00 
+                - (inv_cov_00 * inv_cov_11 + inv_cov_01 * inv_cov_01) * dL_dinv_cov_01 
+                - 2.0 * inv_cov_11 * inv_cov_01 * dL_dinv_cov_11;
 
     let dL_dcov_2d = vec3f(dL_da, dL_db, dL_dc);
 
@@ -161,6 +163,6 @@ fn main(
 
     if (transmittance < 0.0001) { break; }
     loop_counter++;
-    if (loop_counter > 100000) { break; }
+    // if (loop_counter > 100000) { break; }
   }
 }

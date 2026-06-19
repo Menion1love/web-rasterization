@@ -51,7 +51,7 @@ const init = async () => {
   for (let i = 0; i < text.length; i++) {
     primitives.push(new primitive(
       new vec3(text[i].pos[0], text[i].pos[1], text[i].pos[2]),
-      new vec3(0.1, 0.1, 0.1),
+      new vec3(0.1),
       new vec4(0, 0, 0, 1),
       0.6,
       new vec4(text[i].color[0], text[i].color[1], text[i].color[2], text[i].color[3]),
