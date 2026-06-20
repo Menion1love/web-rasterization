@@ -13,8 +13,8 @@ const init = async () => {
   let rnd = new render();
   await rnd.init(canvasId as HTMLElement);
   let primitives: primitive[] = [];
-  let js = await fetch("./bin/gaussians.json");
-  let jscam = await fetch("./bin/cam1.json");
+  let js = await fetch("./bin/points.json");
+  let jscam = await fetch("./bin/cam.json");
   let text = await js.json();
   let cam = await jscam.json();
   let curCam = 0;
@@ -24,7 +24,7 @@ const init = async () => {
     const targetH = rnd.canvas.height;
 
     const Path = `bin/images/${cam[curCam].name}`;
-    // const Path = `bin/images/true.png`;
+    // const Path = `bin/images/true2.png`;
 
     const response = await fetch(Path);
     const blob = await response.blob();
@@ -51,7 +51,7 @@ const init = async () => {
   for (let i = 0; i < text.length; i++) {
     primitives.push(new primitive(
       new vec3(text[i].pos[0], text[i].pos[1], text[i].pos[2]),
-      new vec3(0.1),
+      new vec3(text[i].scale),
       new vec4(0, 0, 0, 1),
       0.6,
       new vec4(text[i].color[0], text[i].color[1], text[i].color[2], text[i].color[3]),
@@ -87,18 +87,35 @@ const init = async () => {
     //     new vec4(1, 0, 1, 1),
     //   ));
 
+    // True2 png params
     // primitives.push(new primitive(
     //     new vec3(0),
-    //     new vec3(0.2, 0.2, 0.01),
-    //     new vec4(0.0, 0.0, 0.0, 1),
+    //     new vec3(0.6, 0.2, 0.2),
+    //     new vec4(0.0, 0.0, 0.7, 1),
     //     0.8,
     //     new vec4(1, 0, 1, 1),
     //   ));
 
     // primitives.push(new primitive(
     //     new vec3(1),
-    //     new vec3(0.2, 0.2, 0.2),
+    //     new vec3(0.2, 0.8, 0.2),
     //     new vec4(0, 0, 0, 1),
+    //     0.9,
+    //     new vec4(0, 0, 1.0, 1),
+    //   ));
+
+    // primitives.push(new primitive(
+    //     new vec3(-1),
+    //     new vec3(0.6, 0.2, 0.1),
+    //     new vec4(0.0, 0.0, 0.7, 1),
+    //     0.8,
+    //     new vec4(1.0, 0, 1, 1),
+    //   ));
+
+    // primitives.push(new primitive(
+    //     new vec3(1),
+    //     new vec3(0.2, 0.8, 0.2),
+    //     new vec4(0, 0, 0.0, 1),
     //     0.9,
     //     new vec4(0, 0, 1.0, 1),
     //   ));
@@ -126,7 +143,7 @@ const init = async () => {
     curCam++;
     if (curCam > cam.length - 1)
       curCam = 0;
-    updateDisplay();     
+    updateDisplay();
     load();
   });
 

@@ -82,20 +82,22 @@ fn main(
   let g_id = global_id.x;
   let gs = inputData[idx];
 
-  let dL_dopacity  = f32(global_grads.grads[g_id].opacity) / 1000000.0;
-  let dL_dcolor_r  = f32(global_grads.grads[g_id].color_r) / 1000000.0;
-  let dL_dcolor_g  = f32(global_grads.grads[g_id].color_g) / 1000000.0;
-  let dL_dcolor_b  = f32(global_grads.grads[g_id].color_b) / 1000000.0;
+  let scale = 10000.0; 
+
+  let dL_dopacity  = f32(global_grads.grads[g_id].opacity) / scale;
+  let dL_dcolor_r  = f32(global_grads.grads[g_id].color_r) / scale;
+  let dL_dcolor_g  = f32(global_grads.grads[g_id].color_g) / scale;
+  let dL_dcolor_b  = f32(global_grads.grads[g_id].color_b) / scale;
   let dL_dcolor    = vec3f(dL_dcolor_r, dL_dcolor_g, dL_dcolor_b);
 
   let dL_dcenter_2d = vec2f(
-      f32(global_grads.grads[g_id].center_x) / 1000000.0,
-      f32(global_grads.grads[g_id].center_y) / 1000000.0
+      f32(global_grads.grads[g_id].center_x) / scale,
+      f32(global_grads.grads[g_id].center_y) / scale
   );
   let dL_dcov_2d = vec3f(
-      f32(global_grads.grads[g_id].cov_a) / 1000000.0,
-      f32(global_grads.grads[g_id].cov_b) / 1000000.0,
-      f32(global_grads.grads[g_id].cov_c) / 1000000.0
+      f32(global_grads.grads[g_id].cov_a) / scale,
+      f32(global_grads.grads[g_id].cov_b) / scale,
+      f32(global_grads.grads[g_id].cov_c) / scale
   );
 
   let t = camera.view * vec4<f32>(gs.position, 1.0);
@@ -121,7 +123,7 @@ fn main(
   dL_dxyz_camera.z = dL_dcenter_2d.x * J_02 + dL_dcenter_2d.y * J_12;
 
   let R_cam = mat3x3f(camera.view[0].xyz, camera.view[1].xyz, camera.view[2].xyz);
-  let dL_dxyz_world = transpose(R_cam) * dL_dxyz_camera;
+  var dL_dxyz_world = transpose(R_cam) * dL_dxyz_camera;
 
   let dL_da = dL_dcov_2d.x;
   let dL_db = dL_dcov_2d.y;
@@ -222,7 +224,7 @@ fn main(
   let lr_rotation = 0.005;
   let lr_color = 0.005;
   let lr_opacity = 0.005;
-  let lr_xyz = 0.00005;
+  let lr_xyz = 0.015;
 
   var new_scale = inputData[g_id].scale - lr_scale * hat_M_scale / (sqrt(hat_V_scale) + eps);
   inputData[g_id].scale = max(new_scale, vec3f(1e-5));
@@ -236,12 +238,8 @@ fn main(
   var new_rot = inputData[g_id].rotation - lr_rotation * hat_M_rot / (sqrt(hat_V_rot) + eps);
 
   var normalized_rot = normalize(new_rot);
-
-  // if (normalized_rot.w < 0.0) {
-  //   normalized_rot = -normalized_rot;
-  // }
-
   inputData[g_id].rotation = normalized_rot;
+
   adam_M[g_id].color = vec4f(beta1 * adam_M[g_id].color.xyz + (1.0 - beta1) * dL_dcolor, 1.0);
   adam_V[g_id].color = vec4f(beta2 * adam_V[g_id].color.xyz + (1.0 - beta2) * (dL_dcolor * dL_dcolor), 1.0);
 

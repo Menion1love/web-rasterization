@@ -76,10 +76,6 @@ fn main(
   var transmittance = textureLoad(tex_transsmitance, pixel_coord, 0).r;
   var dL_dI = textureLoad(tex_gradients, pixel_coord, 0).rgb;
 
-  if (dL_dI.x == 0.0 && dL_dI.y == 0.0 && dL_dI.z == 0.0) {
-    return;
-  }
-
   var C_after = vec3f(0.0);
 
   var loop_counter = 0;
@@ -117,7 +113,7 @@ fn main(
 
     let dL_dcolor = dL_dI * alpha * transmittance;
 
-    let dL_dalpha_vector = dL_dI * (data.color - C_after) * transmittance;
+    let dL_dalpha_vector = dL_dI * (data.color * transmittance - C_after);
     let dL_dalpha: f32 = dL_dalpha_vector.r + dL_dalpha_vector.g + dL_dalpha_vector.b;
 
     let dL_dopacity = dL_dalpha * exp(power);
@@ -125,7 +121,7 @@ fn main(
 
     let dp_dc_x = d.x * inv_cov_00 + d.y * inv_cov_01;
     let dp_dc_y = d.x * inv_cov_01 + d.y * inv_cov_11;
-    let dL_dcenter_2d = vec2f(dp_dc_x, dp_dc_y) * dL_dpower;
+    let dL_dcenter_2d = vec2f(dp_dc_x, dp_dc_y) * (dL_dpower);
 
     let dL_dinv_cov_00 = -0.5 * d.x * d.x * dL_dpower;
     let dL_dinv_cov_01 = -1.0 * d.x * d.y * dL_dpower;
@@ -144,7 +140,7 @@ fn main(
 
     let dL_dcov_2d = vec3f(dL_da, dL_db, dL_dc);
 
-    let scale = 1000000.0; 
+    let scale = 10000.0; 
 
     atomicAdd(&global_grads.grads[g_id].color_r, i32(round(dL_dcolor.r * scale)));
     atomicAdd(&global_grads.grads[g_id].color_g, i32(round(dL_dcolor.g * scale)));
@@ -163,6 +159,6 @@ fn main(
 
     if (transmittance < 0.0001) { break; }
     loop_counter++;
-    // if (loop_counter > 100000) { break; }
+    if (loop_counter > 100000) { break; }
   }
 }
