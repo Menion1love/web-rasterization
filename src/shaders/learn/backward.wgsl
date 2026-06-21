@@ -45,6 +45,11 @@ struct GaussianGradients {
   grads: array<SingleGaussianGrad>, 
 }
 
+struct DensityStats {
+  grad_accum: atomic<i32>,
+  visible_count: atomic<u32>,
+}
+
 @group(0) @binding(0) var<uniform> camera : camData;
 @group(0) @binding(1) var<storage, read> inputData: array<rasterData>;
 @group(0) @binding(2) var<storage, read_write> valuesBuffer: array<u32>;
@@ -52,6 +57,7 @@ struct GaussianGradients {
 @group(0) @binding(4) var tex_gradients: texture_2d<f32>;
 @group(0) @binding(5) var tex_transsmitance: texture_2d<f32>;
 @group(0) @binding(6) var<storage, read_write> global_grads: GaussianGradients;
+@group(0) @binding(7) var<storage, read_write> density_stats: array<DensityStats>;
 
 @compute @workgroup_size(16, 16)
 fn main(
@@ -91,9 +97,10 @@ fn main(
     let b = data.cov_2d.y;
     let c = data.cov_2d.z;
     
-    let det = a * c - b * b;
-
+    let det_raw = a * c - b * b;
+    let det = sign(det_raw) * max(abs(det_raw), 0.01);
     let inv_det = 1.0 / det;
+
     let inv_cov_00 = c * inv_det;
     let inv_cov_01 = -b * inv_det;
     let inv_cov_11 = a * inv_det;
@@ -113,7 +120,7 @@ fn main(
 
     let dL_dcolor = dL_dI * alpha * transmittance;
 
-    let dL_dalpha_vector = dL_dI * (data.color * transmittance - C_after);
+    let dL_dalpha_vector = dL_dI * (data.color - C_after) * transmittance;
     let dL_dalpha: f32 = dL_dalpha_vector.r + dL_dalpha_vector.g + dL_dalpha_vector.b;
 
     let dL_dopacity = dL_dalpha * exp(power);
@@ -122,6 +129,11 @@ fn main(
     let dp_dc_x = d.x * inv_cov_00 + d.y * inv_cov_01;
     let dp_dc_y = d.x * inv_cov_01 + d.y * inv_cov_11;
     let dL_dcenter_2d = vec2f(dp_dc_x, dp_dc_y) * (dL_dpower);
+
+    let grad2d_norm = length(dL_dcenter_2d);
+    let stat_scale = 1000.0;
+    atomicAdd(&density_stats[g_id].grad_accum, i32(round(grad2d_norm * stat_scale)));
+    atomicAdd(&density_stats[g_id].visible_count, 1u);
 
     let dL_dinv_cov_00 = -0.5 * d.x * d.x * dL_dpower;
     let dL_dinv_cov_01 = -1.0 * d.x * d.y * dL_dpower;
@@ -140,7 +152,7 @@ fn main(
 
     let dL_dcov_2d = vec3f(dL_da, dL_db, dL_dc);
 
-    let scale = 10000.0; 
+    let scale = 1000.0; 
 
     atomicAdd(&global_grads.grads[g_id].color_r, i32(round(dL_dcolor.r * scale)));
     atomicAdd(&global_grads.grads[g_id].color_g, i32(round(dL_dcolor.g * scale)));
@@ -159,6 +171,6 @@ fn main(
 
     if (transmittance < 0.0001) { break; }
     loop_counter++;
-    if (loop_counter > 100000) { break; }
+    // if (loop_counter > 100000) { break; }
   }
 }

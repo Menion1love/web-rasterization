@@ -13,8 +13,8 @@ const init = async () => {
   let rnd = new render();
   await rnd.init(canvasId as HTMLElement);
   let primitives: primitive[] = [];
-  let js = await fetch("./bin/points.json");
-  let jscam = await fetch("./bin/cam.json");
+  let js = await fetch("./bin/gaussians.json");
+  let jscam = await fetch("./bin/cam1.json");
   let text = await js.json();
   let cam = await jscam.json();
   let curCam = 0;
@@ -27,7 +27,15 @@ const init = async () => {
     // const Path = `bin/images/true2.png`;
 
     const response = await fetch(Path);
+    if (!response.ok) {
+      console.error(`Failed to load image: ${Path}, status: ${response.status}`);
+      return;
+    }
     const blob = await response.blob();
+    if (blob.size === 0) {
+      console.error(`Empty blob for: ${Path}`);
+      return;
+    }
 
     const imageBitmap = await createImageBitmap(blob, {
       colorSpaceConversion: 'default',
@@ -51,7 +59,7 @@ const init = async () => {
   for (let i = 0; i < text.length; i++) {
     primitives.push(new primitive(
       new vec3(text[i].pos[0], text[i].pos[1], text[i].pos[2]),
-      new vec3(text[i].scale),
+      new vec3(0.02),
       new vec4(0, 0, 0, 1),
       0.6,
       new vec4(text[i].color[0], text[i].color[1], text[i].color[2], text[i].color[3]),
@@ -147,14 +155,16 @@ const init = async () => {
     load();
   });
 
-  let flag = false;
+  let flag = true;
 
 
   renderButton?.addEventListener('click', async (): Promise<void> => {
-    flag = true;
+    flag = !flag;
   });
 
   rnd.attachToDraw(primitives);
+
+  let iter = 0;
   
   const draw = async () => {
     rnd.start();
@@ -167,9 +177,16 @@ const init = async () => {
     //     0.9,
     //     new vec4(0, 0, 1.0, 1),
     //   ));
+    if (iter % 100 == 0)
+    {
+      curCam = Math.floor(Math.random() * cam.length);
+      if (curCam >= cam.length)
+        curCam = cam.length - 1;
+    }
 
+    await load();
 
-    if (cam.length > 0)
+    if (flag && cam.length > 0)
     {
       let loc = new vec3(cam[curCam].loc[0], cam[curCam].loc[1], cam[curCam].loc[2]);
       let at = new vec3(cam[curCam].at[0], cam[curCam].at[1], cam[curCam].at[2]);
@@ -178,8 +195,14 @@ const init = async () => {
       rnd.controls.cam.set(loc, target, up);
     }
 
-    await rnd.end(true);  
-    flag = false;
+    await rnd.end(flag);  
+    iter++;
+    // if (iter > 4500)
+    // {
+    //   iter = 0;
+    //   rnd.IterationsCount = 1;
+    //   curCam++;
+    // }
     //rnd.primsClear();
     window.requestAnimationFrame(draw);
   };

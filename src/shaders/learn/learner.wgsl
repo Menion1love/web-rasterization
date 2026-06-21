@@ -82,7 +82,7 @@ fn main(
   let g_id = global_id.x;
   let gs = inputData[idx];
 
-  let scale = 10000.0; 
+  let scale = 1000.0; 
 
   let dL_dopacity  = f32(global_grads.grads[g_id].opacity) / scale;
   let dL_dcolor_r  = f32(global_grads.grads[g_id].color_r) / scale;
@@ -209,7 +209,7 @@ fn main(
 
   let beta1 = 0.9;
   let beta2 = 0.999;
-  let eps = 1e-8;
+  let eps = 1e-5;
   let it = f32(iterator); 
   let bias_corr1 = 1.0 - pow(0.9, it);
   let bias_corr2 = 1.0 - pow(0.999, it);
@@ -220,14 +220,15 @@ fn main(
   let hat_M_scale = adam_M[g_id].scale / bias_corr1;
   let hat_V_scale = adam_V[g_id].scale / bias_corr2;
 
-  let lr_scale = 0.005;
-  let lr_rotation = 0.005;
-  let lr_color = 0.005;
-  let lr_opacity = 0.005;
-  let lr_xyz = 0.015;
+  let lr_scale = 0.00026;
+  let lr_rotation = 0.001;
+  let lr_color = 0.0004;
+  let lr_opacity = 0.04;
+  let lr_xyz = 0.0038;
 
   var new_scale = inputData[g_id].scale - lr_scale * hat_M_scale / (sqrt(hat_V_scale) + eps);
-  inputData[g_id].scale = max(new_scale, vec3f(1e-5));
+  let MAX_SCALE = 0.5; 
+  inputData[g_id].scale = clamp(new_scale, vec3f(1e-5), vec3f(MAX_SCALE));
 
   adam_M[g_id].rotation = beta1 * adam_M[g_id].rotation + (1.0 - beta1) * dL_dq;
   adam_V[g_id].rotation = beta2 * adam_V[g_id].rotation + (1.0 - beta2) * (dL_dq * dL_dq);

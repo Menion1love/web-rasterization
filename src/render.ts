@@ -83,6 +83,7 @@ class render extends core
   private tileBuffer!: buffer;
   private counterBuffer!: buffer;
   private stagingBuffer!: buffer;
+  private stagingBuffer2!: buffer;
   private cameraBuffer!: buffer;
   private cameraData!: Float32Array;
 
@@ -102,10 +103,31 @@ class render extends core
   private adamMBuffer!: buffer;
   private adamVBuffer!: buffer;
   private iteratorBuffer!: buffer;
+  private freeSlotBuffer!: buffer;
+  private aliveFlagsBuffer!: buffer;
+  private denistyBuffer!: buffer;
+  private denistyParamsBuffer!: buffer;
+  private denistyclearPipeline!: GPUComputePipeline;
+  private denistyclearBindGroup!: GPUBindGroup;
+  private denistyctrlPipeline!: GPUComputePipeline;
+  private denistyctrlBindGroup!: GPUBindGroup;
 
   private primitives: primitive[] = [];
   private globalKeysCount: number = 1;
-  private IterationsCount: number = 1;
+  public IterationsCount: number = 1;
+  private warmupIters = 200;
+  private densifyInterval = 100;
+  private stopDensifyIter = 15000;
+  private gaussainsCount = 0;
+
+  /**
+   * @info Calculate capacity function
+   * @param count: count to capacity
+   * @returns None.
+   */
+  public calcCapacity(count: number): number {
+    return count * 2;
+  } /** End of 'calcCapacity' function */
 
   /**
    * @info Initialize context function
@@ -155,49 +177,74 @@ class render extends core
     this.valuesBuffer = new buffer(this);
     this.tileBuffer = new buffer(this);
     this.stagingBuffer = new buffer(this);
+    this.stagingBuffer2 = new buffer(this);
     this.gGradBuffer = new buffer(this);
     this.adamMBuffer = new buffer(this);
     this.adamVBuffer = new buffer(this);
     this.iteratorBuffer = new buffer(this);
+    this.freeSlotBuffer = new buffer(this);
+    this.aliveFlagsBuffer = new buffer(this);
+    this.denistyBuffer = new buffer(this);
+    this.denistyParamsBuffer = new buffer(this);
 
     this.stagingBuffer.create({
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       size: 4,
     })
+
+    this.stagingBuffer2.create({
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      size: 4,
+    })
+
+    this.freeSlotBuffer.create({
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+      size: 4,
+    })
+
+    this.aliveFlagsBuffer.create({
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+      size: 4,
+    })
+
+    this.denistyBuffer.create({
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+      size: 8,
+    })
     
     this.iteratorBuffer.create({
       size: 4,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
       type: "uniform",
       label: "iterator buffer",
     });
 
     this.inputBuffer.create({
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
       size: 64,
       label: "input",
     });
 
     this.adamMBuffer.create({
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
       size: 64,
       label: "adam M",
     });
 
     this.adamVBuffer.create({
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
       size: 64,
       label: "adam V",
     });
 
     this.gGradBuffer.create({
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
       size: 48,
       label: "grad",
     })
 
     this.outputBuffer.create({
-      usage: GPUBufferUsage.STORAGE,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       size: 64,
       label: "output",
     });
@@ -207,6 +254,13 @@ class render extends core
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       type: "uniform",
       label: "camera",
+    });
+
+    this.denistyParamsBuffer.create({
+      size: 48,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      type: "uniform",
+      label: "denisty",
     });
     
     let tileSizex = Math.ceil(this.canvas.width / 16);
@@ -281,6 +335,10 @@ class render extends core
         { 
           binding: 1, 
           resource: { buffer: this.tileBuffer.buffer }
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.counterBuffer.buffer }
         },
       ]
     });
@@ -418,6 +476,10 @@ class render extends core
           binding: 6, 
           resource: { buffer: this.gGradBuffer.buffer }
         },
+        { 
+          binding: 7, 
+          resource: { buffer: this.denistyBuffer.buffer }
+        },
       ]
     });
 
@@ -454,6 +516,64 @@ class render extends core
         { 
           binding: 5, 
           resource: { buffer: this.iteratorBuffer.buffer } 
+        },
+      ]
+    });
+
+    const denClearShaderModule = await this.loadShaderModule("src/shaders/learn/clear_density.wgsl");
+
+    this.denistyclearPipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: denClearShaderModule, entryPoint: 'main' }
+    });
+
+    this.denistyclearBindGroup = this.device.createBindGroup({
+      layout: this.denistyclearPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.denistyBuffer.buffer }
+        },
+      ]
+    });
+
+    const denCtrlShaderModule = await this.loadShaderModule("src/shaders/learn/density_control.wgsl");
+
+    this.denistyctrlPipeline = this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: denCtrlShaderModule, entryPoint: 'main' }
+    });
+
+    this.denistyctrlBindGroup = this.device.createBindGroup({
+      layout: this.denistyctrlPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.inputBuffer.buffer }
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.adamMBuffer.buffer } 
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.adamVBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: { buffer: this.aliveFlagsBuffer.buffer } 
+        },
+        { 
+          binding: 4, 
+          resource: { buffer: this.denistyBuffer.buffer } 
+        },
+        { 
+          binding: 5, 
+          resource: { buffer: this.freeSlotBuffer.buffer } 
+        },
+        { 
+          binding: 6, 
+          resource: { buffer: this.denistyParamsBuffer.buffer } 
         },
       ]
     });
@@ -640,8 +760,10 @@ class render extends core
       opacity: p.opacity,
       index: p.index
     }));
+    this.gaussainsCount += prims.length;
+    const len = this.calcCapacity(this.primitives.length);
     
-    const totalBufferSize = gaussians.length * 16 * 4; 
+    const totalBufferSize = len * 16 * 4;
     
     const arrayBuffer = new ArrayBuffer(totalBufferSize);
     const floatView = new Float32Array(arrayBuffer);
@@ -670,7 +792,225 @@ class render extends core
       floatView[offset + 14] = g.color.z;
       floatView[offset + 15] = g.color.w;
     }
+
     await this.inputBuffer.updateArray(arrayBuffer);
+    await this.outputBuffer.resize(len * 16 * 4);
+    await this.gGradBuffer.resize(len * 12 * 4);
+    await this.adamMBuffer.resize(len * 16 * 4);
+    await this.adamVBuffer.resize(len * 16 * 4);
+    await this.aliveFlagsBuffer.resize(len * 4);
+    await this.denistyBuffer.resize(len * 2 * 4);
+
+    const aliveArrayBuffer = new ArrayBuffer(len * 4);
+    const aliveView = new Uint32Array(aliveArrayBuffer);
+
+    for (let i = 0; i < gaussians.length; i++) {
+      aliveView[i] = 1;
+    }
+
+    await this.aliveFlagsBuffer.resize(len * 4);
+    await this.aliveFlagsBuffer.updateArray(aliveArrayBuffer);
+
+    const densityArrayBuffer = new ArrayBuffer(len * 2 * 4);
+
+    await this.denistyBuffer.resize(len * 2 * 4);
+    await this.denistyBuffer.updateArray(densityArrayBuffer);
+
+    this.gGradBuffer.isSizeChanged = false;
+    this.adamVBuffer.isSizeChanged = false;
+    this.adamMBuffer.isSizeChanged = false;
+    this.inputBuffer.isSizeChanged = false;
+    this.outputBuffer.isSizeChanged = false;
+
+    this.bindGroup = this.device.createBindGroup({
+      layout: this.computePipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.cameraBuffer.buffer }
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.inputBuffer.buffer } 
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.outputBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: { buffer: this.counterBuffer.buffer } 
+        }
+      ]
+    });
+
+      
+    this.keysBindGroup = this.device.createBindGroup({
+      layout: this.keysPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.cameraBuffer.buffer }
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.outputBuffer.buffer } 
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.keysBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: { buffer: this.valuesBuffer.buffer } 
+        },
+        { 
+          binding: 4, 
+          resource: { buffer: this.counterBuffer.buffer } 
+        }
+      ]
+    });
+
+    this.rasterBindGroup = this.device.createBindGroup({
+      layout: this.rasterPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.cameraBuffer.buffer }
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.outputBuffer.buffer } 
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.valuesBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: { buffer: this.tileBuffer.buffer } 
+        },
+        { 
+          binding: 4, 
+          resource: this.renderTextureView 
+        },
+        { 
+          binding: 5, 
+          resource: this.transmittanceTextureView 
+        },
+      ]
+    });
+      
+    this.backwardBindGroup = this.device.createBindGroup({
+      layout: this.backwardPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.cameraBuffer.buffer }
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.outputBuffer.buffer } 
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.valuesBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: { buffer: this.tileBuffer.buffer } 
+        },
+        { 
+          binding: 4, 
+          resource: this.gradientTextureView 
+        },
+        { 
+          binding: 5, 
+          resource: this.transmittanceTextureView 
+        },
+        { 
+          binding: 6, 
+          resource: { buffer: this.gGradBuffer.buffer }
+        },
+        { 
+          binding: 7, 
+          resource: { buffer: this.denistyBuffer.buffer }
+        },
+      ]
+    });
+
+    this.learnBindGroup = this.device.createBindGroup({
+      layout: this.learnPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.cameraBuffer.buffer }
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.inputBuffer.buffer } 
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.gGradBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: { buffer: this.adamMBuffer.buffer } 
+        },
+        { 
+          binding: 4, 
+          resource: { buffer: this.adamVBuffer.buffer } 
+        },
+        { 
+          binding: 5, 
+          resource: { buffer: this.iteratorBuffer.buffer } 
+        },
+      ]
+    });
+
+    this.denistyclearBindGroup = this.device.createBindGroup({
+      layout: this.denistyclearPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.denistyBuffer.buffer }
+        },
+      ]
+    });
+    this.denistyctrlBindGroup = this.device.createBindGroup({
+      layout: this.denistyctrlPipeline.getBindGroupLayout(0),
+      entries: [
+        { 
+          binding: 0,
+          resource: { buffer: this.inputBuffer.buffer }
+        },
+        { 
+          binding: 1, 
+          resource: { buffer: this.adamMBuffer.buffer } 
+        },
+        { 
+          binding: 2, 
+          resource: { buffer: this.adamVBuffer.buffer } 
+        },
+        { 
+          binding: 3, 
+          resource: { buffer: this.aliveFlagsBuffer.buffer } 
+        },
+        { 
+          binding: 4, 
+          resource: { buffer: this.denistyBuffer.buffer } 
+        },
+        { 
+          binding: 5, 
+          resource: { buffer: this.freeSlotBuffer.buffer } 
+        },
+        { 
+          binding: 6, 
+          resource: { buffer: this.denistyParamsBuffer.buffer } 
+        },
+      ]
+    });
   }
 
   private async readCounter() {
@@ -691,7 +1031,7 @@ class render extends core
    * @info Draw low level function
    * @returns None.
    */
-  private async drawLow() {
+  private async drawLow(flag: boolean) {
     if (this.primitives.length == 0 || !this.commandEncoder) 
       return;
     
@@ -708,9 +1048,23 @@ class render extends core
     this.cameraData.set([this.controls.cam.right.x, this.controls.cam.right.y, this.controls.cam.right.z, this.controls.cam.wp], offset); offset += 4;
     this.cameraData.set([this.controls.cam.up.x, this.controls.cam.up.y, this.controls.cam.up.z, this.controls.cam.hp], offset);
       
+    const arrayBuffer = new ArrayBuffer(48);
+    const floatView = new Float32Array(arrayBuffer);
+    const uintView = new Uint32Array(arrayBuffer);
+    const caplen = this.inputBuffer.bufferDesriptor.size / 4;
+    
+    floatView[0] = 0.0015;
+    floatView[1] = 0.03;
+    floatView[2] = 0.05; 
+    uintView[3] = caplen;
+    uintView[4] = this.IterationsCount;
+
+    await this.denistyParamsBuffer.updateArray(arrayBuffer);
+
     await this.cameraBuffer.update(this.cameraData);
     await this.counterBuffer.updateInteger(new Uint32Array([0]));
     await this.iteratorBuffer.updateInteger(new Uint32Array([this.IterationsCount]));
+    await this.freeSlotBuffer.updateInteger(new Uint32Array([this.gaussainsCount]));
 
     this.commandEncoder.clearBuffer(this.tileBuffer.buffer);
     this.commandEncoder.clearBuffer(this.valuesBuffer.buffer);
@@ -720,175 +1074,12 @@ class render extends core
     let tileSizex = Math.ceil(this.canvas.width / 16);
     let tileSizey = Math.ceil(this.canvas.height / 16);
 
-    const len = this.primitives.length;
-    
-    if (this.inputBuffer.isSizeChanged)
-    {
-      await this.outputBuffer.resize(len * 16 * 4);
-      await this.gGradBuffer.resize(len * 12 * 4);
-      await this.adamMBuffer.resize(len * 16 * 4);
-      await this.adamVBuffer.resize(len * 16 * 4);
-      this.commandEncoder.clearBuffer(this.adamMBuffer.buffer);
-      this.commandEncoder.clearBuffer(this.adamVBuffer.buffer);
-      this.commandEncoder.clearBuffer(this.gGradBuffer.buffer);
-
-      this.gGradBuffer.isSizeChanged = false;
-      this.adamVBuffer.isSizeChanged = false;
-      this.adamMBuffer.isSizeChanged = false;
-      this.inputBuffer.isSizeChanged = false;
-      this.outputBuffer.isSizeChanged = false;
-
-      this.bindGroup = this.device.createBindGroup({
-        layout: this.computePipeline.getBindGroupLayout(0),
-        entries: [
-          { 
-            binding: 0,
-            resource: { buffer: this.cameraBuffer.buffer }
-          },
-          { 
-            binding: 1, 
-            resource: { buffer: this.inputBuffer.buffer } 
-          },
-          { 
-            binding: 2, 
-            resource: { buffer: this.outputBuffer.buffer } 
-          },
-          { 
-            binding: 3, 
-            resource: { buffer: this.counterBuffer.buffer } 
-          }
-        ]
-      });
-
-      
-      this.keysBindGroup = this.device.createBindGroup({
-        layout: this.keysPipeline.getBindGroupLayout(0),
-        entries: [
-          { 
-            binding: 0,
-            resource: { buffer: this.cameraBuffer.buffer }
-          },
-          { 
-            binding: 1, 
-            resource: { buffer: this.outputBuffer.buffer } 
-          },
-          { 
-            binding: 2, 
-            resource: { buffer: this.keysBuffer.buffer } 
-          },
-          { 
-            binding: 3, 
-            resource: { buffer: this.valuesBuffer.buffer } 
-          },
-          { 
-            binding: 4, 
-            resource: { buffer: this.counterBuffer.buffer } 
-          }
-        ]
-      });
-
-      this.rasterBindGroup = this.device.createBindGroup({
-        layout: this.rasterPipeline.getBindGroupLayout(0),
-        entries: [
-          { 
-            binding: 0,
-            resource: { buffer: this.cameraBuffer.buffer }
-          },
-          { 
-            binding: 1, 
-            resource: { buffer: this.outputBuffer.buffer } 
-          },
-          { 
-            binding: 2, 
-            resource: { buffer: this.valuesBuffer.buffer } 
-          },
-          { 
-            binding: 3, 
-            resource: { buffer: this.tileBuffer.buffer } 
-          },
-          { 
-            binding: 4, 
-            resource: this.renderTextureView 
-          },
-          { 
-            binding: 5, 
-            resource: this.transmittanceTextureView 
-          },
-        ]
-      });
-      
-      this.backwardBindGroup = this.device.createBindGroup({
-        layout: this.backwardPipeline.getBindGroupLayout(0),
-        entries: [
-          { 
-            binding: 0,
-            resource: { buffer: this.cameraBuffer.buffer }
-          },
-          { 
-            binding: 1, 
-            resource: { buffer: this.outputBuffer.buffer } 
-          },
-          { 
-            binding: 2, 
-            resource: { buffer: this.valuesBuffer.buffer } 
-          },
-          { 
-            binding: 3, 
-            resource: { buffer: this.tileBuffer.buffer } 
-          },
-          { 
-            binding: 4, 
-            resource: this.gradientTextureView 
-          },
-          { 
-            binding: 5, 
-            resource: this.transmittanceTextureView 
-          },
-          { 
-            binding: 6, 
-            resource: { buffer: this.gGradBuffer.buffer }
-          },
-        ]
-      });
-
-      this.learnBindGroup = this.device.createBindGroup({
-        layout: this.learnPipeline.getBindGroupLayout(0),
-        entries: [
-          { 
-            binding: 0,
-            resource: { buffer: this.cameraBuffer.buffer }
-          },
-          { 
-            binding: 1, 
-            resource: { buffer: this.inputBuffer.buffer } 
-          },
-          { 
-            binding: 2, 
-            resource: { buffer: this.gGradBuffer.buffer } 
-          },
-          { 
-            binding: 3, 
-            resource: { buffer: this.adamMBuffer.buffer } 
-          },
-          { 
-            binding: 4, 
-            resource: { buffer: this.adamVBuffer.buffer } 
-          },
-          { 
-            binding: 5, 
-            resource: { buffer: this.iteratorBuffer.buffer } 
-          },
-        ]
-      });
-
-    }
-
     this.computePassEncoder = this.commandEncoder.beginComputePass({});
     
     // Project points and get matrices
     this.computePassEncoder.setPipeline(this.computePipeline);
     this.computePassEncoder.setBindGroup(0, this.bindGroup);
-    this.computePassEncoder.dispatchWorkgroups(Math.floor((len + 63) / this.workGroupSize), 1, 1);
+    this.computePassEncoder.dispatchWorkgroups(Math.floor((this.gaussainsCount + 63) / this.workGroupSize), 1, 1);
     this.computePassEncoder.end();
 
     this.commandEncoder.copyBufferToBuffer(
@@ -906,6 +1097,7 @@ class render extends core
 
     if (this.keysBuffer.isSizeChanged || this.valuesBuffer.isSizeChanged)
     {
+      console.log(this.globalKeysCount);
       this.keysBuffer.isSizeChanged = false;
       this.valuesBuffer.isSizeChanged = false;
       this.tileBindGroup = this.device.createBindGroup({
@@ -918,6 +1110,10 @@ class render extends core
           { 
             binding: 1, 
             resource: { buffer: this.tileBuffer.buffer }
+          },
+          { 
+            binding: 2, 
+            resource: { buffer: this.counterBuffer.buffer }
           },
         ]
       });
@@ -1009,6 +1205,43 @@ class render extends core
             binding: 6, 
             resource: { buffer: this.gGradBuffer.buffer }
           },
+          { 
+            binding: 7, 
+            resource: { buffer: this.denistyBuffer.buffer }
+          },
+        ]
+      });
+      this.denistyctrlBindGroup = this.device.createBindGroup({
+        layout: this.denistyctrlPipeline.getBindGroupLayout(0),
+        entries: [
+          { 
+            binding: 0,
+            resource: { buffer: this.inputBuffer.buffer }
+          },
+          { 
+            binding: 1, 
+            resource: { buffer: this.adamMBuffer.buffer } 
+          },
+          { 
+            binding: 2, 
+            resource: { buffer: this.adamVBuffer.buffer } 
+          },
+          { 
+            binding: 3, 
+            resource: { buffer: this.aliveFlagsBuffer.buffer } 
+          },
+          { 
+            binding: 4, 
+            resource: { buffer: this.denistyBuffer.buffer } 
+          },
+          { 
+            binding: 5, 
+            resource: { buffer: this.freeSlotBuffer.buffer } 
+          },
+          { 
+            binding: 6, 
+            resource: { buffer: this.denistyParamsBuffer.buffer } 
+          },
         ]
       });
 
@@ -1025,20 +1258,18 @@ class render extends core
     
     // Update counter
     this.commandEncoder.clearBuffer(this.counterBuffer.buffer);
-    if (this.globalKeysCount == 0) return;
 
     this.computePassEncoder = this.commandEncoder.beginComputePass({});
 
     // Fill keys and values
     this.computePassEncoder.setPipeline(this.keysPipeline);
     this.computePassEncoder.setBindGroup(0, this.keysBindGroup);
-    this.computePassEncoder.dispatchWorkgroups(Math.floor((len + 63) / this.workGroupSize), 1, 1);
+    this.computePassEncoder.dispatchWorkgroups(Math.floor((this.gaussainsCount + 63) / this.workGroupSize), 1, 1);
 
     // Sort keys
     this.radixSortKernel.dispatch(this.computePassEncoder);
 
     // Get tile ranges
-    // let perWorkgroupSize = Maththis.keysBuffer.bufferDesriptor.size / 12;
     this.computePassEncoder.setPipeline(this.tilePipeline);
     this.computePassEncoder.setBindGroup(0, this.tileBindGroup);
     this.computePassEncoder.dispatchWorkgroups(Math.floor((this.keysBuffer.bufferDesriptor.size / 4 + 255) / 256), 1, 1);
@@ -1049,26 +1280,58 @@ class render extends core
     this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
     this.computePassEncoder.end();
 
-    this.computePassEncoder = this.commandEncoder.beginComputePass({});
-    
-    // Gradients calculation
-    this.computePassEncoder.setPipeline(this.gradientPipeline);
-    this.computePassEncoder.setBindGroup(0, this.gradientBindGroup);
-    this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
+    if (flag)
+    {
 
-    // Backward pass
-    this.computePassEncoder.setPipeline(this.backwardPipeline);
-    this.computePassEncoder.setBindGroup(0, this.backwardBindGroup);
-    this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
-    
-    // Learn pass 
-    this.computePassEncoder.setPipeline(this.learnPipeline);
-    this.computePassEncoder.setBindGroup(0, this.learnBindGroup);
-    this.computePassEncoder.dispatchWorkgroups(Math.floor((len + 63) / this.workGroupSize), 1, 1);
-    this.computePassEncoder.end();
-    
-    this.IterationsCount++;
+      this.computePassEncoder = this.commandEncoder.beginComputePass({});
+      
+      // Gradients calculation
+      this.computePassEncoder.setPipeline(this.gradientPipeline);
+      this.computePassEncoder.setBindGroup(0, this.gradientBindGroup);
+      this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
+
+      // Backward pass
+      this.computePassEncoder.setPipeline(this.backwardPipeline);
+      this.computePassEncoder.setBindGroup(0, this.backwardBindGroup);
+      this.computePassEncoder.dispatchWorkgroups(tileSizex, tileSizey, 1);
+      
+      // Learn pass 
+      this.computePassEncoder.setPipeline(this.learnPipeline);
+      this.computePassEncoder.setBindGroup(0, this.learnBindGroup);
+      this.computePassEncoder.dispatchWorkgroups(Math.floor((this.gaussainsCount + 63) / this.workGroupSize), 1, 1);
+      
+
+      if (this.IterationsCount > this.warmupIters && this.IterationsCount < this.stopDensifyIter && this.IterationsCount % this.densifyInterval === 0)
+      {
+        const workgroups = Math.ceil(this.gaussainsCount / 256);
+        this.computePassEncoder.setPipeline(this.denistyctrlPipeline);
+        this.computePassEncoder.setBindGroup(0, this.denistyctrlBindGroup);
+        this.computePassEncoder.dispatchWorkgroups(workgroups, 1, 1);
+
+        this.computePassEncoder.setPipeline(this.denistyclearPipeline);
+        this.computePassEncoder.setBindGroup(0, this.denistyclearBindGroup);
+        this.computePassEncoder.dispatchWorkgroups(workgroups, 1, 1);
+        
+        this.computePassEncoder.end();
+        
+        this.commandEncoder.copyBufferToBuffer(
+          this.freeSlotBuffer.buffer,
+          0,
+          this.stagingBuffer2.buffer,
+          0,
+          4
+        );
+        this.denFlag = true;
+      }
+      else 
+        this.computePassEncoder.end();
+      
+      
+      this.IterationsCount++;
+    }
   } /** End of 'drawLow' function */
+
+  private denFlag = false;
 
   /**
    * @info End render function
@@ -1078,27 +1341,24 @@ class render extends core
   public async end(flag: boolean) {
     if (!this.commandEncoder) return;
 
-    if (flag)
-    {
-      const clearPassDescriptor: GPURenderPassDescriptor = {
-        colorAttachments: [
-          {
-          view: this.renderTextureView, 
-          clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
-          loadOp: 'clear',
-          storeOp: 'store'
-        },
+    const clearPassDescriptor: GPURenderPassDescriptor = {
+      colorAttachments: [
         {
-          view: this.gradientTextureView, 
-          clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
-          loadOp: 'clear',
-          storeOp: 'store'
-        }],
-      };
-      const clearPass = this.commandEncoder.beginRenderPass(clearPassDescriptor);
-      clearPass.end();
-      await this.drawLow();
-    }
+        view: this.renderTextureView, 
+        clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+        loadOp: 'clear',
+        storeOp: 'store'
+      },
+      {
+        view: this.gradientTextureView, 
+        clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+        loadOp: 'clear',
+        storeOp: 'store'
+      }],
+    };
+    const clearPass = this.commandEncoder.beginRenderPass(clearPassDescriptor);
+    clearPass.end();
+    await this.drawLow(flag);
 
     const renderPassDescriptor: GPURenderPassDescriptor = {
       colorAttachments: [{
@@ -1117,6 +1377,274 @@ class render extends core
     this.passEncoder.end();
 
     this.queue.submit([this.commandEncoder.finish()]);
+    if (flag)
+      await this.device.queue.onSubmittedWorkDone();
+
+    if (this.denFlag)
+    {
+      await this.device.queue.onSubmittedWorkDone();
+      await this.stagingBuffer2.buffer.mapAsync(GPUMapMode.READ);
+      const buf = this.stagingBuffer2.buffer.getMappedRange();
+      const view = new Uint32Array(buf);
+      
+      const newlen = view[0];
+      this.stagingBuffer2.buffer.unmap();
+      this.denFlag = false;
+      this.gaussainsCount = newlen;
+      if (this.gaussainsCount > this.inputBuffer.bufferDesriptor.size / 4)
+      {
+        const newLen = this.calcCapacity(this.gaussainsCount);
+        
+        const oldInputBuffer = this.inputBuffer.buffer;
+        const oldOutputBuffer = this.outputBuffer.buffer;
+        const oldAdamMBuffer = this.adamMBuffer.buffer;
+        const oldAdamVBuffer = this.adamVBuffer.buffer;
+        const oldAliveFlagsBuffer = this.aliveFlagsBuffer.buffer;
+        const oldDenistyBuffer = this.denistyBuffer.buffer;
+        const oldGGradBuffer = this.gGradBuffer.buffer;
+
+        const oldInputSize = oldInputBuffer.size;
+        const oldOutputSize = oldOutputBuffer.size;
+        const oldAdamMSize = oldAdamMBuffer.size;
+        const oldAdamVSize = oldAdamVBuffer.size;
+        const oldAliveFlagsSize = oldAliveFlagsBuffer.size;
+        const oldDenistySize = oldDenistyBuffer.size;
+        const oldGGradSize = oldGGradBuffer.size;
+
+        await this.inputBuffer.resize(newLen * 16 * 4);
+        await this.outputBuffer.resize(newLen * 16 * 4);
+        await this.gGradBuffer.resize(newLen * 12 * 4);
+        await this.adamMBuffer.resize(newLen * 16 * 4);
+        await this.adamVBuffer.resize(newLen * 16 * 4);
+        await this.aliveFlagsBuffer.resize(newLen * 4);
+        await this.denistyBuffer.resize(newLen * 2 * 4);
+
+        const copyEncoder = this.device.createCommandEncoder();
+        copyEncoder.copyBufferToBuffer(oldInputBuffer, 0, this.inputBuffer.buffer, 0, oldInputSize);
+        copyEncoder.copyBufferToBuffer(oldOutputBuffer, 0, this.outputBuffer.buffer, 0, oldOutputSize);
+        copyEncoder.copyBufferToBuffer(oldAdamMBuffer, 0, this.adamMBuffer.buffer, 0, oldAdamMSize);
+        copyEncoder.copyBufferToBuffer(oldAdamVBuffer, 0, this.adamVBuffer.buffer, 0, oldAdamVSize);
+        copyEncoder.copyBufferToBuffer(oldAliveFlagsBuffer, 0, this.aliveFlagsBuffer.buffer, 0, oldAliveFlagsSize);
+        copyEncoder.copyBufferToBuffer(oldDenistyBuffer, 0, this.denistyBuffer.buffer, 0, oldDenistySize);
+        copyEncoder.copyBufferToBuffer(oldGGradBuffer, 0, this.gGradBuffer.buffer, 0, oldGGradSize);
+        this.queue.submit([copyEncoder.finish()]);
+
+        oldInputBuffer.destroy();
+        oldOutputBuffer.destroy();
+        oldAdamMBuffer.destroy();
+        oldAdamVBuffer.destroy();
+        oldAliveFlagsBuffer.destroy();
+        oldDenistyBuffer.destroy();
+        oldGGradBuffer.destroy();
+
+        this.bindGroup = this.device.createBindGroup({
+          layout: this.computePipeline.getBindGroupLayout(0),
+          entries: [
+            { 
+              binding: 0,
+              resource: { buffer: this.cameraBuffer.buffer }
+            },
+            { 
+              binding: 1, 
+              resource: { buffer: this.inputBuffer.buffer } 
+            },
+            { 
+              binding: 2, 
+              resource: { buffer: this.outputBuffer.buffer } 
+            },
+            { 
+              binding: 3, 
+              resource: { buffer: this.counterBuffer.buffer } 
+            }
+          ]
+        });
+
+          
+        this.keysBindGroup = this.device.createBindGroup({
+          layout: this.keysPipeline.getBindGroupLayout(0),
+          entries: [
+            { 
+              binding: 0,
+              resource: { buffer: this.cameraBuffer.buffer }
+            },
+            { 
+              binding: 1, 
+              resource: { buffer: this.outputBuffer.buffer } 
+            },
+            { 
+              binding: 2, 
+              resource: { buffer: this.keysBuffer.buffer } 
+            },
+            { 
+              binding: 3, 
+              resource: { buffer: this.valuesBuffer.buffer } 
+            },
+            { 
+              binding: 4, 
+              resource: { buffer: this.counterBuffer.buffer } 
+            }
+          ]
+        });
+
+        this.rasterBindGroup = this.device.createBindGroup({
+          layout: this.rasterPipeline.getBindGroupLayout(0),
+          entries: [
+            { 
+              binding: 0,
+              resource: { buffer: this.cameraBuffer.buffer }
+            },
+            { 
+              binding: 1, 
+              resource: { buffer: this.outputBuffer.buffer } 
+            },
+            { 
+              binding: 2, 
+              resource: { buffer: this.valuesBuffer.buffer } 
+            },
+            { 
+              binding: 3, 
+              resource: { buffer: this.tileBuffer.buffer } 
+            },
+            { 
+              binding: 4, 
+              resource: this.renderTextureView 
+            },
+            { 
+              binding: 5, 
+              resource: this.transmittanceTextureView 
+            },
+          ]
+        });
+          
+        this.backwardBindGroup = this.device.createBindGroup({
+          layout: this.backwardPipeline.getBindGroupLayout(0),
+          entries: [
+            { 
+              binding: 0,
+              resource: { buffer: this.cameraBuffer.buffer }
+            },
+            { 
+              binding: 1, 
+              resource: { buffer: this.outputBuffer.buffer } 
+            },
+            { 
+              binding: 2, 
+              resource: { buffer: this.valuesBuffer.buffer } 
+            },
+            { 
+              binding: 3, 
+              resource: { buffer: this.tileBuffer.buffer } 
+            },
+            { 
+              binding: 4, 
+              resource: this.gradientTextureView 
+            },
+            { 
+              binding: 5, 
+              resource: this.transmittanceTextureView 
+            },
+            { 
+              binding: 6, 
+              resource: { buffer: this.gGradBuffer.buffer }
+            },
+            { 
+              binding: 7, 
+              resource: { buffer: this.denistyBuffer.buffer }
+            },
+          ]
+        });
+
+        this.learnBindGroup = this.device.createBindGroup({
+          layout: this.learnPipeline.getBindGroupLayout(0),
+          entries: [
+            { 
+              binding: 0,
+              resource: { buffer: this.cameraBuffer.buffer }
+            },
+            { 
+              binding: 1, 
+              resource: { buffer: this.inputBuffer.buffer } 
+            },
+            { 
+              binding: 2, 
+              resource: { buffer: this.gGradBuffer.buffer } 
+            },
+            { 
+              binding: 3, 
+              resource: { buffer: this.adamMBuffer.buffer } 
+            },
+            { 
+              binding: 4, 
+              resource: { buffer: this.adamVBuffer.buffer } 
+            },
+            { 
+              binding: 5, 
+              resource: { buffer: this.iteratorBuffer.buffer } 
+            },
+          ]
+        });
+
+        this.denistyclearBindGroup = this.device.createBindGroup({
+          layout: this.denistyclearPipeline.getBindGroupLayout(0),
+          entries: [
+            { 
+              binding: 0,
+              resource: { buffer: this.denistyBuffer.buffer }
+            },
+          ]
+        });
+        this.denistyctrlBindGroup = this.device.createBindGroup({
+          layout: this.denistyctrlPipeline.getBindGroupLayout(0),
+          entries: [
+            { 
+              binding: 0,
+              resource: { buffer: this.inputBuffer.buffer }
+            },
+            { 
+              binding: 1, 
+              resource: { buffer: this.adamMBuffer.buffer } 
+            },
+            { 
+              binding: 2, 
+              resource: { buffer: this.adamVBuffer.buffer } 
+            },
+            { 
+              binding: 3, 
+              resource: { buffer: this.aliveFlagsBuffer.buffer } 
+            },
+            { 
+              binding: 4, 
+              resource: { buffer: this.denistyBuffer.buffer } 
+            },
+            { 
+              binding: 5, 
+              resource: { buffer: this.freeSlotBuffer.buffer } 
+            },
+            { 
+              binding: 6, 
+              resource: { buffer: this.denistyParamsBuffer.buffer } 
+            },
+          ]
+        });
+      }
+      
+      const len = this.calcCapacity(this.gaussainsCount);
+
+      const aliveArrayBuffer = new ArrayBuffer(len * 4);
+      const aliveView = new Uint32Array(aliveArrayBuffer);
+
+      for (let i = 0; i < this.gaussainsCount; i++) {
+        aliveView[i] = 1;
+      }
+
+      await this.aliveFlagsBuffer.resize(len * 4);
+      await this.aliveFlagsBuffer.updateArray(aliveArrayBuffer);
+
+      const densityArrayBuffer = new ArrayBuffer(len * 2 * 4);
+
+      await this.denistyBuffer.resize(len * 2 * 4);
+      await this.denistyBuffer.updateArray(densityArrayBuffer);
+    }
     
     this.passEncoder = null;
     this.commandEncoder = null;
