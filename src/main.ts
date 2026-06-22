@@ -13,8 +13,8 @@ const init = async () => {
   let rnd = new render();
   await rnd.init(canvasId as HTMLElement);
   let primitives: primitive[] = [];
-  let js = await fetch("./bin/points.json");
-  let jscam = await fetch("./bin/cam.json");
+  let js = await fetch("./bin/train/gaussians.json");
+  let jscam = await fetch("./bin/train/cam.json");
   let text = await js.json();
   let cam = await jscam.json();
   let curCam = 0;
@@ -55,7 +55,7 @@ const init = async () => {
     rnd.reload();
 
   }
-  // const response = await fetch("./bin/scene_data3.bin");
+  // const response = await fetch("./bin/scene_data_4.bin");
   // const arrayBuffer = await response.arrayBuffer();
   
   // const floatData = new Float32Array(arrayBuffer);
@@ -100,7 +100,7 @@ const init = async () => {
   for (let i = 0; i < text.length; i++) {
     primitives.push(new primitive(
       new vec3(text[i].pos[0], text[i].pos[1], text[i].pos[2]),
-      new vec3(text[i].scale > 1.0 ? 1.0 : text[i].scale),
+      new vec3(0.02),
       new vec4(0, 0, 0, 1),
       0.6,
       new vec4(text[i].color[0], text[i].color[1], text[i].color[2], text[i].color[3]),

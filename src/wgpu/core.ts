@@ -53,7 +53,8 @@ class core
           maxComputeWorkgroupSizeX: adapter.limits.maxComputeWorkgroupSizeX,
           maxComputeWorkgroupSizeY: adapter.limits.maxComputeWorkgroupSizeY,
           maxComputeWorkgroupSizeZ: adapter.limits.maxComputeWorkgroupSizeZ,
-          maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize
+          maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+          maxBufferSize: adapter.limits.maxBufferSize,
         }
       }
     );

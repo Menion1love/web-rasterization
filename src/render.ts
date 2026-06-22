@@ -119,6 +119,7 @@ class render extends core
   private densifyInterval = 100;
   private stopDensifyIter = 15000;
   private gaussainsCount = 0;
+  private FrameID = 0;
 
   /**
    * @info Calculate capacity function
@@ -1347,6 +1348,7 @@ class render extends core
    */
   public async end(flag: boolean) {
     if (!this.commandEncoder) return;
+    this.FrameID++;
 
     const clearPassDescriptor: GPURenderPassDescriptor = {
       colorAttachments: [
