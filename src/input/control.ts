@@ -114,7 +114,7 @@ class control {
       
       const newPos = this.cam.loc.add(movement);
       const newAt = newPos.add(forward);
-      this.cam.set(newPos, newAt, new vec3(0, 1, 0));
+      this.cam.set(newPos, newAt, new vec3(0, -1, 0));
       
       if ((movement.length() > 0.001 || input.leftClick) && this.onCameraMove) {
         this.onCameraMove();
@@ -140,7 +140,7 @@ class control {
       
       // Update target values based on input
       this.targetAzimuth += 
-        ((input.leftClick ? 1 : 0) *
+        (-(input.leftClick ? 1 : 0) *
           timer.globalDeltaTime *
           3.0 *
           (3.5 * input.mouseDX) +
@@ -195,7 +195,7 @@ class control {
         this.cam.at.z + this.cam.dist * Math.sin(elevatorRad) * Math.sin(azimuthRad)
       );
       
-      this.cam.set(cameraPos, this.cam.at, new vec3(0, 1, 0));
+      this.cam.set(cameraPos, this.cam.at, new vec3(0, -1, 0));
       
       // Check for significant movement AFTER interpolation
       const posDiff = this.cam.loc.sub(this.lastCameraPos).length();

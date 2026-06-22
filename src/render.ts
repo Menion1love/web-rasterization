@@ -126,7 +126,7 @@ class render extends core
    * @returns None.
    */
   public calcCapacity(count: number): number {
-    return count * 2;
+    return count * 1;
   } /** End of 'calcCapacity' function */
 
   /**
@@ -627,7 +627,7 @@ class render extends core
         topology: 'triangle-list',
       },
     });
-
+    
     this.displayBindGroup = this.device.createBindGroup({
       layout: displayBindGroupLayout,
       entries: [
@@ -1053,8 +1053,8 @@ class render extends core
     const uintView = new Uint32Array(arrayBuffer);
     const caplen = this.inputBuffer.bufferDesriptor.size / 4;
     
-    floatView[0] = 0.0015;
-    floatView[1] = 0.03;
+    floatView[0] = 0.003;
+    floatView[1] = 0.01;
     floatView[2] = 0.05; 
     uintView[3] = caplen;
     uintView[4] = this.IterationsCount;
@@ -1260,11 +1260,14 @@ class render extends core
     this.commandEncoder.clearBuffer(this.counterBuffer.buffer);
 
     this.computePassEncoder = this.commandEncoder.beginComputePass({});
+    const totalWorkgroups = Math.floor((this.gaussainsCount + 63) / this.workGroupSize);
+    const dispatchX = Math.min(totalWorkgroups, 256);
+    const dispatchY = Math.ceil(totalWorkgroups / dispatchX);
 
     // Fill keys and values
     this.computePassEncoder.setPipeline(this.keysPipeline);
     this.computePassEncoder.setBindGroup(0, this.keysBindGroup);
-    this.computePassEncoder.dispatchWorkgroups(Math.floor((this.gaussainsCount + 63) / this.workGroupSize), 1, 1);
+    this.computePassEncoder.dispatchWorkgroups(dispatchX, dispatchY, 1);
 
     // Sort keys
     this.radixSortKernel.dispatch(this.computePassEncoder);
@@ -1272,7 +1275,11 @@ class render extends core
     // Get tile ranges
     this.computePassEncoder.setPipeline(this.tilePipeline);
     this.computePassEncoder.setBindGroup(0, this.tileBindGroup);
-    this.computePassEncoder.dispatchWorkgroups(Math.floor((this.keysBuffer.bufferDesriptor.size / 4 + 255) / 256), 1, 1);
+    
+    const totalTileGroups = Math.floor((this.keysBuffer.bufferDesriptor.size / 4 + 255) / 256);
+    const tileDispatchX = Math.min(totalTileGroups, 256);
+    const tileDispatchY = Math.ceil(totalTileGroups / tileDispatchX);
+    this.computePassEncoder.dispatchWorkgroups(tileDispatchX, tileDispatchY, 1);
 
     // Rasterization
     this.computePassEncoder.setPipeline(this.rasterPipeline);
@@ -1391,242 +1398,244 @@ class render extends core
       this.stagingBuffer2.buffer.unmap();
       this.denFlag = false;
       this.gaussainsCount = newlen;
-      if (this.gaussainsCount > this.inputBuffer.bufferDesriptor.size / 4)
-      {
-        const newLen = this.calcCapacity(this.gaussainsCount);
+      if (newlen > this.inputBuffer.bufferDesriptor.size / 4)
+        this.gaussainsCount = this.inputBuffer.bufferDesriptor.size / 4;
+      // if (this.gaussainsCount > this.inputBuffer.bufferDesriptor.size / 4)
+      // {
+      //   const newLen = this.calcCapacity(this.gaussainsCount);
         
-        const oldInputBuffer = this.inputBuffer.buffer;
-        const oldOutputBuffer = this.outputBuffer.buffer;
-        const oldAdamMBuffer = this.adamMBuffer.buffer;
-        const oldAdamVBuffer = this.adamVBuffer.buffer;
-        const oldAliveFlagsBuffer = this.aliveFlagsBuffer.buffer;
-        const oldDenistyBuffer = this.denistyBuffer.buffer;
-        const oldGGradBuffer = this.gGradBuffer.buffer;
+      //   const oldInputBuffer = this.inputBuffer.buffer;
+      //   const oldOutputBuffer = this.outputBuffer.buffer;
+      //   const oldAdamMBuffer = this.adamMBuffer.buffer;
+      //   const oldAdamVBuffer = this.adamVBuffer.buffer;
+      //   const oldAliveFlagsBuffer = this.aliveFlagsBuffer.buffer;
+      //   const oldDenistyBuffer = this.denistyBuffer.buffer;
+      //   const oldGGradBuffer = this.gGradBuffer.buffer;
 
-        const oldInputSize = oldInputBuffer.size;
-        const oldOutputSize = oldOutputBuffer.size;
-        const oldAdamMSize = oldAdamMBuffer.size;
-        const oldAdamVSize = oldAdamVBuffer.size;
-        const oldAliveFlagsSize = oldAliveFlagsBuffer.size;
-        const oldDenistySize = oldDenistyBuffer.size;
-        const oldGGradSize = oldGGradBuffer.size;
+      //   const oldInputSize = oldInputBuffer.size;
+      //   const oldOutputSize = oldOutputBuffer.size;
+      //   const oldAdamMSize = oldAdamMBuffer.size;
+      //   const oldAdamVSize = oldAdamVBuffer.size;
+      //   const oldAliveFlagsSize = oldAliveFlagsBuffer.size;
+      //   const oldDenistySize = oldDenistyBuffer.size;
+      //   const oldGGradSize = oldGGradBuffer.size;
 
-        await this.inputBuffer.resize(newLen * 16 * 4);
-        await this.outputBuffer.resize(newLen * 16 * 4);
-        await this.gGradBuffer.resize(newLen * 12 * 4);
-        await this.adamMBuffer.resize(newLen * 16 * 4);
-        await this.adamVBuffer.resize(newLen * 16 * 4);
-        await this.aliveFlagsBuffer.resize(newLen * 4);
-        await this.denistyBuffer.resize(newLen * 2 * 4);
+      //   await this.inputBuffer.resize(newLen * 16 * 4);
+      //   await this.outputBuffer.resize(newLen * 16 * 4);
+      //   await this.gGradBuffer.resize(newLen * 12 * 4);
+      //   await this.adamMBuffer.resize(newLen * 16 * 4);
+      //   await this.adamVBuffer.resize(newLen * 16 * 4);
+      //   await this.aliveFlagsBuffer.resize(newLen * 4);
+      //   await this.denistyBuffer.resize(newLen * 2 * 4);
 
-        const copyEncoder = this.device.createCommandEncoder();
-        copyEncoder.copyBufferToBuffer(oldInputBuffer, 0, this.inputBuffer.buffer, 0, oldInputSize);
-        copyEncoder.copyBufferToBuffer(oldOutputBuffer, 0, this.outputBuffer.buffer, 0, oldOutputSize);
-        copyEncoder.copyBufferToBuffer(oldAdamMBuffer, 0, this.adamMBuffer.buffer, 0, oldAdamMSize);
-        copyEncoder.copyBufferToBuffer(oldAdamVBuffer, 0, this.adamVBuffer.buffer, 0, oldAdamVSize);
-        copyEncoder.copyBufferToBuffer(oldAliveFlagsBuffer, 0, this.aliveFlagsBuffer.buffer, 0, oldAliveFlagsSize);
-        copyEncoder.copyBufferToBuffer(oldDenistyBuffer, 0, this.denistyBuffer.buffer, 0, oldDenistySize);
-        copyEncoder.copyBufferToBuffer(oldGGradBuffer, 0, this.gGradBuffer.buffer, 0, oldGGradSize);
-        this.queue.submit([copyEncoder.finish()]);
+      //   const copyEncoder = this.device.createCommandEncoder();
+      //   copyEncoder.copyBufferToBuffer(oldInputBuffer, 0, this.inputBuffer.buffer, 0, oldInputSize);
+      //   copyEncoder.copyBufferToBuffer(oldOutputBuffer, 0, this.outputBuffer.buffer, 0, oldOutputSize);
+      //   copyEncoder.copyBufferToBuffer(oldAdamMBuffer, 0, this.adamMBuffer.buffer, 0, oldAdamMSize);
+      //   copyEncoder.copyBufferToBuffer(oldAdamVBuffer, 0, this.adamVBuffer.buffer, 0, oldAdamVSize);
+      //   copyEncoder.copyBufferToBuffer(oldAliveFlagsBuffer, 0, this.aliveFlagsBuffer.buffer, 0, oldAliveFlagsSize);
+      //   copyEncoder.copyBufferToBuffer(oldDenistyBuffer, 0, this.denistyBuffer.buffer, 0, oldDenistySize);
+      //   copyEncoder.copyBufferToBuffer(oldGGradBuffer, 0, this.gGradBuffer.buffer, 0, oldGGradSize);
+      //   this.queue.submit([copyEncoder.finish()]);
 
-        oldInputBuffer.destroy();
-        oldOutputBuffer.destroy();
-        oldAdamMBuffer.destroy();
-        oldAdamVBuffer.destroy();
-        oldAliveFlagsBuffer.destroy();
-        oldDenistyBuffer.destroy();
-        oldGGradBuffer.destroy();
+      //   oldInputBuffer.destroy();
+      //   oldOutputBuffer.destroy();
+      //   oldAdamMBuffer.destroy();
+      //   oldAdamVBuffer.destroy();
+      //   oldAliveFlagsBuffer.destroy();
+      //   oldDenistyBuffer.destroy();
+      //   oldGGradBuffer.destroy();
 
-        this.bindGroup = this.device.createBindGroup({
-          layout: this.computePipeline.getBindGroupLayout(0),
-          entries: [
-            { 
-              binding: 0,
-              resource: { buffer: this.cameraBuffer.buffer }
-            },
-            { 
-              binding: 1, 
-              resource: { buffer: this.inputBuffer.buffer } 
-            },
-            { 
-              binding: 2, 
-              resource: { buffer: this.outputBuffer.buffer } 
-            },
-            { 
-              binding: 3, 
-              resource: { buffer: this.counterBuffer.buffer } 
-            }
-          ]
-        });
+      //   this.bindGroup = this.device.createBindGroup({
+      //     layout: this.computePipeline.getBindGroupLayout(0),
+      //     entries: [
+      //       { 
+      //         binding: 0,
+      //         resource: { buffer: this.cameraBuffer.buffer }
+      //       },
+      //       { 
+      //         binding: 1, 
+      //         resource: { buffer: this.inputBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 2, 
+      //         resource: { buffer: this.outputBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 3, 
+      //         resource: { buffer: this.counterBuffer.buffer } 
+      //       }
+      //     ]
+      //   });
 
           
-        this.keysBindGroup = this.device.createBindGroup({
-          layout: this.keysPipeline.getBindGroupLayout(0),
-          entries: [
-            { 
-              binding: 0,
-              resource: { buffer: this.cameraBuffer.buffer }
-            },
-            { 
-              binding: 1, 
-              resource: { buffer: this.outputBuffer.buffer } 
-            },
-            { 
-              binding: 2, 
-              resource: { buffer: this.keysBuffer.buffer } 
-            },
-            { 
-              binding: 3, 
-              resource: { buffer: this.valuesBuffer.buffer } 
-            },
-            { 
-              binding: 4, 
-              resource: { buffer: this.counterBuffer.buffer } 
-            }
-          ]
-        });
+      //   this.keysBindGroup = this.device.createBindGroup({
+      //     layout: this.keysPipeline.getBindGroupLayout(0),
+      //     entries: [
+      //       { 
+      //         binding: 0,
+      //         resource: { buffer: this.cameraBuffer.buffer }
+      //       },
+      //       { 
+      //         binding: 1, 
+      //         resource: { buffer: this.outputBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 2, 
+      //         resource: { buffer: this.keysBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 3, 
+      //         resource: { buffer: this.valuesBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 4, 
+      //         resource: { buffer: this.counterBuffer.buffer } 
+      //       }
+      //     ]
+      //   });
 
-        this.rasterBindGroup = this.device.createBindGroup({
-          layout: this.rasterPipeline.getBindGroupLayout(0),
-          entries: [
-            { 
-              binding: 0,
-              resource: { buffer: this.cameraBuffer.buffer }
-            },
-            { 
-              binding: 1, 
-              resource: { buffer: this.outputBuffer.buffer } 
-            },
-            { 
-              binding: 2, 
-              resource: { buffer: this.valuesBuffer.buffer } 
-            },
-            { 
-              binding: 3, 
-              resource: { buffer: this.tileBuffer.buffer } 
-            },
-            { 
-              binding: 4, 
-              resource: this.renderTextureView 
-            },
-            { 
-              binding: 5, 
-              resource: this.transmittanceTextureView 
-            },
-          ]
-        });
+      //   this.rasterBindGroup = this.device.createBindGroup({
+      //     layout: this.rasterPipeline.getBindGroupLayout(0),
+      //     entries: [
+      //       { 
+      //         binding: 0,
+      //         resource: { buffer: this.cameraBuffer.buffer }
+      //       },
+      //       { 
+      //         binding: 1, 
+      //         resource: { buffer: this.outputBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 2, 
+      //         resource: { buffer: this.valuesBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 3, 
+      //         resource: { buffer: this.tileBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 4, 
+      //         resource: this.renderTextureView 
+      //       },
+      //       { 
+      //         binding: 5, 
+      //         resource: this.transmittanceTextureView 
+      //       },
+      //     ]
+      //   });
           
-        this.backwardBindGroup = this.device.createBindGroup({
-          layout: this.backwardPipeline.getBindGroupLayout(0),
-          entries: [
-            { 
-              binding: 0,
-              resource: { buffer: this.cameraBuffer.buffer }
-            },
-            { 
-              binding: 1, 
-              resource: { buffer: this.outputBuffer.buffer } 
-            },
-            { 
-              binding: 2, 
-              resource: { buffer: this.valuesBuffer.buffer } 
-            },
-            { 
-              binding: 3, 
-              resource: { buffer: this.tileBuffer.buffer } 
-            },
-            { 
-              binding: 4, 
-              resource: this.gradientTextureView 
-            },
-            { 
-              binding: 5, 
-              resource: this.transmittanceTextureView 
-            },
-            { 
-              binding: 6, 
-              resource: { buffer: this.gGradBuffer.buffer }
-            },
-            { 
-              binding: 7, 
-              resource: { buffer: this.denistyBuffer.buffer }
-            },
-          ]
-        });
+      //   this.backwardBindGroup = this.device.createBindGroup({
+      //     layout: this.backwardPipeline.getBindGroupLayout(0),
+      //     entries: [
+      //       { 
+      //         binding: 0,
+      //         resource: { buffer: this.cameraBuffer.buffer }
+      //       },
+      //       { 
+      //         binding: 1, 
+      //         resource: { buffer: this.outputBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 2, 
+      //         resource: { buffer: this.valuesBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 3, 
+      //         resource: { buffer: this.tileBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 4, 
+      //         resource: this.gradientTextureView 
+      //       },
+      //       { 
+      //         binding: 5, 
+      //         resource: this.transmittanceTextureView 
+      //       },
+      //       { 
+      //         binding: 6, 
+      //         resource: { buffer: this.gGradBuffer.buffer }
+      //       },
+      //       { 
+      //         binding: 7, 
+      //         resource: { buffer: this.denistyBuffer.buffer }
+      //       },
+      //     ]
+      //   });
 
-        this.learnBindGroup = this.device.createBindGroup({
-          layout: this.learnPipeline.getBindGroupLayout(0),
-          entries: [
-            { 
-              binding: 0,
-              resource: { buffer: this.cameraBuffer.buffer }
-            },
-            { 
-              binding: 1, 
-              resource: { buffer: this.inputBuffer.buffer } 
-            },
-            { 
-              binding: 2, 
-              resource: { buffer: this.gGradBuffer.buffer } 
-            },
-            { 
-              binding: 3, 
-              resource: { buffer: this.adamMBuffer.buffer } 
-            },
-            { 
-              binding: 4, 
-              resource: { buffer: this.adamVBuffer.buffer } 
-            },
-            { 
-              binding: 5, 
-              resource: { buffer: this.iteratorBuffer.buffer } 
-            },
-          ]
-        });
+      //   this.learnBindGroup = this.device.createBindGroup({
+      //     layout: this.learnPipeline.getBindGroupLayout(0),
+      //     entries: [
+      //       { 
+      //         binding: 0,
+      //         resource: { buffer: this.cameraBuffer.buffer }
+      //       },
+      //       { 
+      //         binding: 1, 
+      //         resource: { buffer: this.inputBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 2, 
+      //         resource: { buffer: this.gGradBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 3, 
+      //         resource: { buffer: this.adamMBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 4, 
+      //         resource: { buffer: this.adamVBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 5, 
+      //         resource: { buffer: this.iteratorBuffer.buffer } 
+      //       },
+      //     ]
+      //   });
 
-        this.denistyclearBindGroup = this.device.createBindGroup({
-          layout: this.denistyclearPipeline.getBindGroupLayout(0),
-          entries: [
-            { 
-              binding: 0,
-              resource: { buffer: this.denistyBuffer.buffer }
-            },
-          ]
-        });
-        this.denistyctrlBindGroup = this.device.createBindGroup({
-          layout: this.denistyctrlPipeline.getBindGroupLayout(0),
-          entries: [
-            { 
-              binding: 0,
-              resource: { buffer: this.inputBuffer.buffer }
-            },
-            { 
-              binding: 1, 
-              resource: { buffer: this.adamMBuffer.buffer } 
-            },
-            { 
-              binding: 2, 
-              resource: { buffer: this.adamVBuffer.buffer } 
-            },
-            { 
-              binding: 3, 
-              resource: { buffer: this.aliveFlagsBuffer.buffer } 
-            },
-            { 
-              binding: 4, 
-              resource: { buffer: this.denistyBuffer.buffer } 
-            },
-            { 
-              binding: 5, 
-              resource: { buffer: this.freeSlotBuffer.buffer } 
-            },
-            { 
-              binding: 6, 
-              resource: { buffer: this.denistyParamsBuffer.buffer } 
-            },
-          ]
-        });
-      }
+      //   this.denistyclearBindGroup = this.device.createBindGroup({
+      //     layout: this.denistyclearPipeline.getBindGroupLayout(0),
+      //     entries: [
+      //       { 
+      //         binding: 0,
+      //         resource: { buffer: this.denistyBuffer.buffer }
+      //       },
+      //     ]
+      //   });
+      //   this.denistyctrlBindGroup = this.device.createBindGroup({
+      //     layout: this.denistyctrlPipeline.getBindGroupLayout(0),
+      //     entries: [
+      //       { 
+      //         binding: 0,
+      //         resource: { buffer: this.inputBuffer.buffer }
+      //       },
+      //       { 
+      //         binding: 1, 
+      //         resource: { buffer: this.adamMBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 2, 
+      //         resource: { buffer: this.adamVBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 3, 
+      //         resource: { buffer: this.aliveFlagsBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 4, 
+      //         resource: { buffer: this.denistyBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 5, 
+      //         resource: { buffer: this.freeSlotBuffer.buffer } 
+      //       },
+      //       { 
+      //         binding: 6, 
+      //         resource: { buffer: this.denistyParamsBuffer.buffer } 
+      //       },
+      //     ]
+      //   });
+      // }
       
       const len = this.calcCapacity(this.gaussainsCount);
 

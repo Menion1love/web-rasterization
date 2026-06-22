@@ -98,7 +98,7 @@ fn main(
     let c = data.cov_2d.z;
     
     let det_raw = a * c - b * b;
-    let det = sign(det_raw) * max(abs(det_raw), 0.01);
+    let det = sign(det_raw) * max(abs(det_raw), 0.0001);
     let inv_det = 1.0 / det;
 
     let inv_cov_00 = c * inv_det;

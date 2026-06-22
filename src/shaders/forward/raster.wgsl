@@ -32,6 +32,10 @@ struct tailData {
 @group(0) @binding(4) var tex: texture_storage_2d<rgba32float, write>;
 @group(0) @binding(5) var tex_t: texture_storage_2d<r32float, write>;
 
+fn isNan(val: f32) -> bool {
+  return val != val;
+}
+
 @compute @workgroup_size(16, 16, 1)
 fn main(@builtin(workgroup_id) workgroup_id : vec3<u32>, @builtin(local_invocation_id) local_id : vec3<u32>, @builtin(global_invocation_id) global_id : vec3<u32>) {
   let pixel_coord = global_id.xy;
@@ -60,21 +64,28 @@ fn main(@builtin(workgroup_id) workgroup_id : vec3<u32>, @builtin(local_invocati
     let b = data.cov_2d.y;
     let c = data.cov_2d.z;
     
-    let det = a * c - b * b;
-    if (det <= 0.0) { continue; }
+    let det_raw = a * c - b * b;
+    let det = sign(det_raw) * max(abs(det_raw), 0.0001);
+
+    if (det < 1e-6 || isNan(det)) { 
+        continue; 
+    }
 
     let inv_det = 1.0 / det;
+
     let inv_cov_00 = c * inv_det;
     let inv_cov_01 = -b * inv_det;
     let inv_cov_11 = a * inv_det;
     
     let power = -0.5 * (d.x * d.x * inv_cov_00 + 2.0 * d.x * d.y * inv_cov_01 + d.y * d.y * inv_cov_11);
     
-    if (power > 0.0) { continue; } 
-    
+    if (power > 0.0 || isNan(power)) { 
+        continue; 
+    } 
+
     let alpha = data.opacity * exp(power);
     
-    if (alpha < 1.0 / 255.0) { continue; }
+    if (alpha <= 0.0) { continue; }
     
     let weight = alpha * transmittance;
     final_color += data.color * weight;

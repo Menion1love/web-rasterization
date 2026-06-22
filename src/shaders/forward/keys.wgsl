@@ -27,8 +27,14 @@ struct rasterData {
 @group(0) @binding(4) var<storage, read_write> global_keys_counter: atomic<u32>;
 
 @compute @workgroup_size(64, 1, 1)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-  let idx = global_id.x;
+fn main(
+  @builtin(workgroup_id) workgroup_id : vec3<u32>,
+  @builtin(local_invocation_index) local_index : u32
+) {
+  let workgroup_linear_id = workgroup_id.y * 256u + workgroup_id.x;
+  let g_id = workgroup_linear_id * 64u + local_index; 
+
+  let idx = g_id;
 
   if (idx >= arrayLength(&inputData)) {
     return; 

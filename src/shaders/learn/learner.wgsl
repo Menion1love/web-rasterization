@@ -209,57 +209,56 @@ fn main(
 
   let beta1 = 0.9;
   let beta2 = 0.999;
-  let eps = 1e-5;
+  let eps = 1e-8;
   let it = f32(iterator); 
   let bias_corr1 = 1.0 - pow(0.9, it);
   let bias_corr2 = 1.0 - pow(0.999, it);
+  
+  let lr_xyz = 0.0016;
+  let lr_rotation = 0.004;
+  let lr_color = 0.001;
+  let lr_opacity = 0.05;
+  let lr_scale = 0.008;
 
-  adam_M[g_id].scale = beta1 * adam_M[g_id].scale + (1.0 - beta1) * dL_dScale;
-  adam_V[g_id].scale = beta2 * adam_V[g_id].scale + (1.0 - beta2) * (dL_dScale * dL_dScale);
+  let current_linear_scale = inputData[g_id].scale;
+  let current_log_scale = log(current_linear_scale + vec3f(1e-8));
+  let dL_dLogScale = dL_dScale * current_linear_scale;
 
-  let hat_M_scale = adam_M[g_id].scale / bias_corr1;
-  let hat_V_scale = adam_V[g_id].scale / bias_corr2;
+  adam_M[g_id].scale = beta1 * adam_M[g_id].scale + (1.0 - beta1) * dL_dLogScale;
+  adam_V[g_id].scale = beta2 * adam_V[g_id].scale + (1.0 - beta2) * (dL_dLogScale * dL_dLogScale);
 
-  let lr_scale = 0.00026;
-  let lr_rotation = 0.001;
-  let lr_color = 0.0004;
-  let lr_opacity = 0.04;
-  let lr_xyz = 0.0038;
-
-  var new_scale = inputData[g_id].scale - lr_scale * hat_M_scale / (sqrt(hat_V_scale) + eps);
-  let MAX_SCALE = 0.5; 
-  inputData[g_id].scale = clamp(new_scale, vec3f(1e-5), vec3f(MAX_SCALE));
+  var new_log_scale = current_log_scale - lr_scale * (adam_M[g_id].scale / bias_corr1) / (sqrt(adam_V[g_id].scale / bias_corr2) + eps);
+  inputData[g_id].scale = clamp(exp(new_log_scale), vec3f(1e-5), vec3f(1.0));
 
   adam_M[g_id].rotation = beta1 * adam_M[g_id].rotation + (1.0 - beta1) * dL_dq;
   adam_V[g_id].rotation = beta2 * adam_V[g_id].rotation + (1.0 - beta2) * (dL_dq * dL_dq);
 
-  let hat_M_rot = adam_M[g_id].rotation / bias_corr1;
-  let hat_V_rot = adam_V[g_id].rotation / bias_corr2;
+  var new_rot = inputData[g_id].rotation - lr_rotation * (adam_M[g_id].rotation / bias_corr1) / (sqrt(adam_V[g_id].rotation / bias_corr2) + eps);
+  inputData[g_id].rotation = normalize(new_rot); 
 
-  var new_rot = inputData[g_id].rotation - lr_rotation * hat_M_rot / (sqrt(hat_V_rot) + eps);
+  adam_M[g_id].color = vec4f(beta1 * adam_M[g_id].color.xyz + (1.0 - beta1) * dL_dcolor, 0.0);
+  adam_V[g_id].color = vec4f(beta2 * adam_V[g_id].color.xyz + (1.0 - beta2) * (dL_dcolor * dL_dcolor), 0.0);
 
-  var normalized_rot = normalize(new_rot);
-  inputData[g_id].rotation = normalized_rot;
+  let hat_M_col = adam_M[g_id].color.xyz / bias_corr1;
+  let hat_V_col = adam_V[g_id].color.xyz / bias_corr2;
 
-  adam_M[g_id].color = vec4f(beta1 * adam_M[g_id].color.xyz + (1.0 - beta1) * dL_dcolor, 1.0);
-  adam_V[g_id].color = vec4f(beta2 * adam_V[g_id].color.xyz + (1.0 - beta2) * (dL_dcolor * dL_dcolor), 1.0);
-
-  let hat_M_col = adam_M[g_id].color / bias_corr1;
-  let hat_V_col = adam_V[g_id].color / bias_corr2;
-
-  var new_color = inputData[g_id].color - lr_color * hat_M_col / (sqrt(hat_V_col) + eps);
-
-  inputData[g_id].color = vec4<f32>(clamp(new_color.xyz, vec3f(0.0), vec3f(1.0)), 1.0);
+  var new_color_xyz = inputData[g_id].color.xyz - lr_color * hat_M_col / (sqrt(hat_V_col) + eps);
+  inputData[g_id].color = vec4f(clamp(new_color_xyz, vec3f(0.0), vec3f(1.0)), 1.0);
   
-  adam_M[g_id].opacity = beta1 * adam_M[g_id].opacity + (1.0 - beta1) * dL_dopacity;
-  adam_V[g_id].opacity = beta2 * adam_V[g_id].opacity + (1.0 - beta2) * (dL_dopacity * dL_dopacity);
+  let current_op = clamp(inputData[g_id].opacity, 1e-5, 0.995);
+  let current_logit_op = log(current_op / (1.0 - current_op)); 
+  
+  let dL_dLogitOp = dL_dopacity * current_op * (1.0 - current_op);
+
+  adam_M[g_id].opacity = beta1 * adam_M[g_id].opacity + (1.0 - beta1) * dL_dLogitOp;
+  adam_V[g_id].opacity = beta2 * adam_V[g_id].opacity + (1.0 - beta2) * (dL_dLogitOp * dL_dLogitOp);
   
   let hat_M_op = adam_M[g_id].opacity / bias_corr1;
   let hat_V_op = adam_V[g_id].opacity / bias_corr2;
   
-  var new_opacity = inputData[g_id].opacity - lr_opacity * hat_M_op / (sqrt(hat_V_op) + eps);
+  var new_logit_op = current_logit_op - lr_opacity * hat_M_op / (sqrt(hat_V_op) + eps);
   
-  inputData[g_id].opacity = clamp(new_opacity, 0.0, 0.99);
+  inputData[g_id].opacity = 1.0 / (1.0 + exp(-new_logit_op));
 
   adam_M[g_id].position = beta1 * adam_M[g_id].position + (1.0 - beta1) * dL_dxyz_world.xyz;
   adam_V[g_id].position = beta2 * adam_V[g_id].position + (1.0 - beta2) * (dL_dxyz_world.xyz * dL_dxyz_world.xyz);

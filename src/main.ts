@@ -13,8 +13,8 @@ const init = async () => {
   let rnd = new render();
   await rnd.init(canvasId as HTMLElement);
   let primitives: primitive[] = [];
-  let js = await fetch("./bin/gaussians.json");
-  let jscam = await fetch("./bin/cam1.json");
+  let js = await fetch("./bin/points.json");
+  let jscam = await fetch("./bin/cam.json");
   let text = await js.json();
   let cam = await jscam.json();
   let curCam = 0;
@@ -55,11 +55,52 @@ const init = async () => {
     rnd.reload();
 
   }
+  // const response = await fetch("./bin/scene_data3.bin");
+  // const arrayBuffer = await response.arrayBuffer();
+  
+  // const floatData = new Float32Array(arrayBuffer);
+  
+  // const stride = 14; 
+  // const numPrimitives = floatData.length / stride;
+  
+  // for (let i = 0; i < numPrimitives; i++) {
+  //   const offset = i * stride;
+    
+  //   const s0 = floatData[offset + 3];
+  //   const s1 = floatData[offset + 4];
+  //   const s2 = floatData[offset + 5];
+
+  //   primitives.push(new primitive(
+  //     new vec3(floatData[offset + 0], floatData[offset + 1], floatData[offset + 2]),
+      
+  //     new vec3(
+  //       s0 > 1.0 ? 1.0 : s0,
+  //       s1 > 1.0 ? 1.0 : s1,
+  //       s2 > 1.0 ? 1.0 : s2
+  //     ),
+      
+  //     new vec4(
+  //       floatData[offset + 6], // X
+  //       floatData[offset + 7], // Y
+  //       floatData[offset + 8], // Z
+  //       floatData[offset + 9]  // W
+  //     ),
+      
+  //     floatData[offset + 10],
+      
+  //     new vec4(
+  //       floatData[offset + 11], // R
+  //       floatData[offset + 12], // G
+  //       floatData[offset + 13], // B
+  //       1.0                     // A
+  //     ),
+  //   ));
+  // }
 
   for (let i = 0; i < text.length; i++) {
     primitives.push(new primitive(
       new vec3(text[i].pos[0], text[i].pos[1], text[i].pos[2]),
-      new vec3(0.02),
+      new vec3(text[i].scale > 1.0 ? 1.0 : text[i].scale),
       new vec4(0, 0, 0, 1),
       0.6,
       new vec4(text[i].color[0], text[i].color[1], text[i].color[2], text[i].color[3]),
@@ -157,7 +198,6 @@ const init = async () => {
 
   let flag = true;
 
-
   renderButton?.addEventListener('click', async (): Promise<void> => {
     flag = !flag;
   });
@@ -177,14 +217,14 @@ const init = async () => {
     //     0.9,
     //     new vec4(0, 0, 1.0, 1),
     //   ));
-    if (iter % 100 == 0)
-    {
-      curCam = Math.floor(Math.random() * cam.length);
-      if (curCam >= cam.length)
-        curCam = cam.length - 1;
-    }
+    // if (iter % 100 == 0) {
+    // {
+    //   curCam = Math.floor(Math.random() * cam.length);
+    //   if (curCam >= cam.length)
+    //     curCam = cam.length - 1;
+    //   await load();
+    // }
 
-    await load();
 
     if (flag && cam.length > 0)
     {
