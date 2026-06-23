@@ -9,14 +9,36 @@
   </head>
   <body>
     <div id="app">
-      <canvas id="webgpu-canvas"></canvas>
-      <div class="counter-container">
-        <button id="prevBtn" class="arrow-btn">&larr;</button>
+      <div id="app-container">
+        <canvas id="webgpu-canvas"></canvas>
+        
+        <div id="sidebar">
+          <div id="mainMenu">
+            <button id="menuLoadPoints">Load Points</button>
+            <button id="menuLoadCameras">Load Cameras</button>
+            <button id="menuClean" style="display: none;">Clean</button>
+          </div>
+          
+          <div id="pointsMenu" style="display: none;">
+            <button id="menuBackPoints">Back</button>
+            <button id="loadPointsBtn">Choose .json or .bin</button>
+            <input type="file" id="pointsFileInput" accept=".json,.bin" style="display: none;">
+          </div>
+          
+          <div id="camerasMenu" style="display: none;">
+            <button id="menuBackCameras">Back</button>
+            <button id="loadCamerasBtn">Choose cameras.json</button>
+            <input type="file" id="camerasFileInput" accept=".json" style="display: none;">
+          </div>
+        </div>
+      </div>
+
+      <div id="trainingControls" style="display: none;">
+        <button id="prevBtn">Prev</button>
         <span id="counterValue">0</span>
-        <button id="nextBtn" class="arrow-btn">&rarr;</button>
-        <button id="renderBtn" class="mega-render-btn">
-          <span>RENDER SCREEN</span>
-        </button>
+        <button id="nextBtn">Next</button>
+        <button id="trainingToggleBtn">Train</button>
+        <button id="autoTrainBtn">Auto: OFF</button>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

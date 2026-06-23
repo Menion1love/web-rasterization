@@ -1386,12 +1386,10 @@ class render extends core
     this.passEncoder.end();
 
     this.queue.submit([this.commandEncoder.finish()]);
-    if (flag)
-      await this.device.queue.onSubmittedWorkDone();
+    await this.device.queue.onSubmittedWorkDone();
 
     if (this.denFlag)
     {
-      await this.device.queue.onSubmittedWorkDone();
       await this.stagingBuffer2.buffer.mapAsync(GPUMapMode.READ);
       const buf = this.stagingBuffer2.buffer.getMappedRange();
       const view = new Uint32Array(buf);
@@ -1662,6 +1660,106 @@ class render extends core
     input.clear();
     // this.primitives = [];
   } /** End of 'end' function */
+
+  public async cleanup() {
+    // Wait for any pending GPU operations
+    await this.device.queue.onSubmittedWorkDone();
+
+    // Destroy all textures
+    if (this.renderTexture) {
+      this.renderTexture.destroy();
+      this.renderTexture = null;
+    }
+    if (this.renderTextureView) {
+      this.renderTextureView = null;
+    }
+    if (this.transmittanceTexture) {
+      this.transmittanceTexture.destroy();
+      this.transmittanceTexture = null;
+    }
+    if (this.transmittanceTextureView) {
+      this.transmittanceTextureView = null;
+    }
+    if (this.gradientTexture) {
+      this.gradientTexture.destroy();
+      this.gradientTexture = null;
+    }
+    if (this.gradientTextureView) {
+      this.gradientTextureView = null;
+    }
+    if (this.imageTexture) {
+      this.imageTexture.destroy();
+      this.imageTexture = null;
+    }
+    if (this.imageTextureView) {
+      this.imageTextureView = null;
+    }
+
+    // Destroy all buffers
+    const buffers = [
+      this.inputBuffer,
+      this.outputBuffer,
+      this.keysBuffer,
+      this.valuesBuffer,
+      this.tileBuffer,
+      this.counterBuffer,
+      this.stagingBuffer,
+      this.stagingBuffer2,
+      this.cameraBuffer,
+      this.gGradBuffer,
+      this.adamMBuffer,
+      this.adamVBuffer,
+      this.iteratorBuffer,
+      this.freeSlotBuffer,
+      this.aliveFlagsBuffer,
+      this.denistyBuffer,
+      this.denistyParamsBuffer
+    ];
+
+    for (const buf of buffers) {
+      if (buf && buf.buffer) {
+        buf.buffer.destroy();
+      }
+    }
+
+    // Clear primitives
+    this.primitives = [];
+    this.gaussainsCount = 0;
+    this.globalKeysCount = 1;
+    this.IterationsCount = 1;
+    this.FrameID = 0;
+    this.denFlag = false;
+    this.cameraData = new Float32Array(0);
+
+    // Nullify all bind groups
+    this.bindGroup = null as any;
+    this.tileBindGroup = null as any;
+    this.keysBindGroup = null as any;
+    this.rasterBindGroup = null as any;
+    this.displayBindGroup = null as any;
+    this.gradientBindGroup = null as any;
+    this.backwardBindGroup = null as any;
+    this.learnBindGroup = null as any;
+    this.denistyclearBindGroup = null as any;
+    this.denistyctrlBindGroup = null as any;
+
+    // Nullify pipelines
+    this.computePipeline = null as any;
+    this.keysPipeline = null as any;
+    this.tilePipeline = null as any;
+    this.rasterPipeline = null as any;
+    this.displayPipeline = null as any;
+    this.gradientPipeline = null as any;
+    this.backwardPipeline = null as any;
+    this.learnPipeline = null as any;
+    this.denistyclearPipeline = null as any;
+    this.denistyctrlPipeline = null as any;
+  }
+
+  public async reinit(id: Element) {
+    await this.cleanup();
+    await this.init(id);
+  }
 } /** End of 'render' class */
 
 export { render }; 

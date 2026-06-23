@@ -1,252 +1,432 @@
 import './style.css'
 import { render, primitive } from "./render.ts"
-import { timer } from "./input/timer.ts"
-import { input } from "./input/input.ts"
 import { vec3 } from "./mth/mth_vec3.ts"
 import { vec4 } from "./mth/mth_vec4.ts"
 
-/** Convert degrees to radians */
-const d2R = (rad: number): number => rad * Math.PI / 180;
+type AppMode = 'none' | 'viewer' | 'training';
+type MenuState = 'main' | 'points' | 'cameras';
+
+interface CameraData {
+  name: string;
+  loc: number[];
+  at: number[];
+  up: number[];
+}
+
+interface GaussianData {
+  pos: number[];
+  color: number[];
+}
+
+class GaussianViewer {
+  rnd: render;
+  mode: AppMode;
+  primitives: primitive[] = [];
+  
+  cameras: CameraData[] = [];
+  currentCam: number = 0;
+  trainingMode: 'manual' | 'auto' = 'manual';
+  
+  prevBtn!: HTMLButtonElement;
+  nextBtn!: HTMLButtonElement;
+  counterDisplay!: HTMLSpanElement;
+  trainingToggleBtn!: HTMLButtonElement;
+  autoTrainBtn!: HTMLButtonElement;
+  
+  pointsFileInput!: HTMLInputElement;
+  camerasFileInput!: HTMLInputElement;
+  
+  pointsLoaded: boolean = false;
+  camerasLoaded: boolean = false;
+  isTrainingActive: boolean = false;
+  isReady: boolean = false;
+  
+  menuState: MenuState = 'main';
+  
+  constructor() {
+    this.rnd = new render();
+    this.mode = 'none';
+  }
+
+  async init() {
+    await this.rnd.init(document.querySelector("#webgpu-canvas") as HTMLElement);
+    this.setupUI();
+    this.drawMessage('LOAD POINTS TO START');
+    this.startRenderLoop();
+  }
+
+  drawMessage(text: string) {
+    const canvas = this.rnd.canvas as HTMLCanvasElement;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '24px monospace';
+    ctx.textAlign = 'center';
+    
+    const lines = text.split('\n');
+    lines.forEach((line, i) => {
+      ctx.fillText(line, canvas.width / 2, canvas.height / 2 + i * 30);
+    });
+  }
+
+  setupUI() {
+    this.prevBtn = document.getElementById('prevBtn') as HTMLButtonElement;
+    this.nextBtn = document.getElementById('nextBtn') as HTMLButtonElement;
+    this.counterDisplay = document.getElementById('counterValue') as HTMLSpanElement;
+    this.trainingToggleBtn = document.getElementById('trainingToggleBtn') as HTMLButtonElement;
+    this.autoTrainBtn = document.getElementById('autoTrainBtn') as HTMLButtonElement;
+    
+    this.pointsFileInput = document.getElementById('pointsFileInput') as HTMLInputElement;
+    this.camerasFileInput = document.getElementById('camerasFileInput') as HTMLInputElement;
+    
+    this.prevBtn?.addEventListener('click', () => this.prevCamera());
+    this.nextBtn?.addEventListener('click', () => this.nextCamera());
+    this.trainingToggleBtn?.addEventListener('click', () => this.toggleTraining());
+    this.autoTrainBtn?.addEventListener('click', () => this.toggleAutoTraining());
+    
+    this.pointsFileInput?.addEventListener('change', (e) => this.loadPointsFile(e));
+    this.camerasFileInput?.addEventListener('change', (e) => this.loadCamerasFile(e));
+    
+    document.getElementById('menuLoadPoints')?.addEventListener('click', () => this.showPointsMenu());
+    document.getElementById('menuLoadCameras')?.addEventListener('click', () => this.showCamerasMenu());
+    document.getElementById('menuBackPoints')?.addEventListener('click', () => this.showMainMenu());
+    document.getElementById('menuBackCameras')?.addEventListener('click', () => this.showMainMenu());
+    document.getElementById('loadPointsBtn')?.addEventListener('click', () => this.pointsFileInput?.click());
+    document.getElementById('loadCamerasBtn')?.addEventListener('click', () => this.camerasFileInput?.click());
+    document.getElementById('menuClean')?.addEventListener('click', () => this.cleanAndReset());
+    
+    this.showMainMenu();
+    this.updateUIForMode();
+  }
+
+  async cleanAndReset() {
+    this.isReady = false;
+    this.isTrainingActive = false;
+    this.pointsLoaded = false;
+    this.camerasLoaded = false;
+    this.mode = 'none';
+    this.primitives = [];
+    this.cameras = [];
+    this.currentCam = 0;
+    this.trainingMode = 'manual';
+    
+    if (this.trainingToggleBtn) {
+      this.trainingToggleBtn.textContent = 'Train';
+      this.trainingToggleBtn.style.background = '#44aa44';
+    }
+    if (this.autoTrainBtn) {
+      this.autoTrainBtn.textContent = 'Auto: OFF';
+      this.autoTrainBtn.style.background = '#333333';
+      this.autoTrainBtn.style.color = '#888';
+    }
+    if (this.counterDisplay) {
+      this.counterDisplay.textContent = '0';
+    }
+    
+    await this.rnd.cleanup();
+    await this.rnd.init(document.querySelector("#webgpu-canvas") as HTMLElement);
+    
+    this.showMainMenu();
+    this.updateUIForMode();
+    this.drawMessage('LOAD POINTS TO START');
+  }
+
+  showMainMenu() {
+    this.menuState = 'main';
+    const mainMenu = document.getElementById('mainMenu');
+    const pointsMenu = document.getElementById('pointsMenu');
+    const camerasMenu = document.getElementById('camerasMenu');
+    
+    if (mainMenu) mainMenu.style.display = 'flex';
+    if (pointsMenu) pointsMenu.style.display = 'none';
+    if (camerasMenu) camerasMenu.style.display = 'none';
+  }
+
+  showPointsMenu() {
+    this.menuState = 'points';
+    const mainMenu = document.getElementById('mainMenu');
+    const pointsMenu = document.getElementById('pointsMenu');
+    const camerasMenu = document.getElementById('camerasMenu');
+    
+    if (mainMenu) mainMenu.style.display = 'none';
+    if (pointsMenu) pointsMenu.style.display = 'flex';
+    if (camerasMenu) camerasMenu.style.display = 'none';
+  }
+
+  showCamerasMenu() {
+    this.menuState = 'cameras';
+    const mainMenu = document.getElementById('mainMenu');
+    const pointsMenu = document.getElementById('pointsMenu');
+    const camerasMenu = document.getElementById('camerasMenu');
+    
+    if (mainMenu) mainMenu.style.display = 'none';
+    if (pointsMenu) pointsMenu.style.display = 'none';
+    if (camerasMenu) camerasMenu.style.display = 'flex';
+  }
+
+  updateUIForMode() {
+    const sidebar = document.getElementById('sidebar');
+    const trainingControls = document.getElementById('trainingControls');
+    const cleanBtn = document.getElementById('menuClean');
+    const loadCamerasBtn = document.getElementById('menuLoadCameras');
+    
+    if (sidebar) {
+      sidebar.style.display = (this.pointsLoaded && this.camerasLoaded) ? 'none' : 'flex';
+    }
+    if (trainingControls) {
+      trainingControls.style.display = (this.pointsLoaded && this.camerasLoaded) ? 'flex' : 'none';
+    }
+    if (cleanBtn) {
+      cleanBtn.style.display = (this.pointsLoaded || this.camerasLoaded) ? 'flex' : 'none';
+    }
+    if (loadCamerasBtn) {
+      loadCamerasBtn.style.display = this.pointsLoaded ? 'flex' : 'none';
+    }
+  }
+
+  async loadPointsFile(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    
+    this.drawMessage('LOADING POINTS...');
+    
+    try {
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      
+      if (extension === 'json') {
+        await this.loadPointsFromJSON(file);
+      } else if (extension === 'bin') {
+        await this.loadPointsFromBinary(file);
+      } else {
+        throw new Error('Unsupported file format');
+      }
+      
+      this.pointsLoaded = true;
+      this.isReady = true;
+      this.mode = this.camerasLoaded ? 'training' : 'viewer';
+      
+      if (this.mode === 'viewer') {
+        this.rnd.attachToDraw(this.primitives);
+      }
+      
+      this.updateUIForMode();
+      this.showMainMenu();
+    } catch (error) {
+      console.error("Failed to load points:", error);
+      this.drawMessage('ERROR LOADING POINTS\nTRY AGAIN');
+    }
+  }
+
+  async loadPointsFromJSON(file: File) {
+    const text = await file.text();
+    const gaussiansData: GaussianData[] = JSON.parse(text);
+    
+    this.primitives = [];
+    for (let i = 0; i < gaussiansData.length; i++) {
+      const g = gaussiansData[i];
+      this.primitives.push(new primitive(
+        new vec3(g.pos[0], g.pos[1], g.pos[2]),
+        new vec3(0.02),
+        new vec4(0, 0, 0, 1),
+        0.6,
+        new vec4(g.color[0], g.color[1], g.color[2], g.color[3]),
+      ));
+      this.primitives[i].index = i;
+    }
+  }
+
+  async loadPointsFromBinary(file: File) {
+    const arrayBuffer = await file.arrayBuffer();
+    const floatData = new Float32Array(arrayBuffer);
+    
+    const stride = 14;
+    const numPrimitives = floatData.length / stride;
+    
+    this.primitives = [];
+    for (let i = 0; i < numPrimitives; i++) {
+      const offset = i * stride;
+      
+      const s0 = floatData[offset + 3];
+      const s1 = floatData[offset + 4];
+      const s2 = floatData[offset + 5];
+
+      this.primitives.push(new primitive(
+        new vec3(floatData[offset + 0], floatData[offset + 1], floatData[offset + 2]),
+        new vec3(
+          s0 > 1.0 ? 1.0 : s0,
+          s1 > 1.0 ? 1.0 : s1,
+          s2 > 1.0 ? 1.0 : s2
+        ),
+        new vec4(
+          floatData[offset + 6],
+          floatData[offset + 7],
+          floatData[offset + 8],
+          floatData[offset + 9]
+        ),
+        floatData[offset + 10],
+        new vec4(
+          floatData[offset + 11],
+          floatData[offset + 12],
+          floatData[offset + 13],
+          1.0
+        ),
+      ));
+    }
+  }
+
+  async loadCamerasFile(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    
+    try {
+      const text = await file.text();
+      this.cameras = JSON.parse(text);
+      this.camerasLoaded = true;
+      this.currentCam = 0;
+      
+      if (this.pointsLoaded) {
+        this.mode = 'training';
+        this.rnd.attachToDraw(this.primitives);
+        await this.loadCurrentImage();
+        this.updateCameraDisplay();
+      }
+      
+      this.updateUIForMode();
+      this.showMainMenu();
+    } catch (error) {
+      console.error("Failed to load cameras:", error);
+    }
+  }
+
+  async loadCurrentImage() {
+    if (!this.camerasLoaded || this.cameras.length === 0) return;
+    
+    const targetW = this.rnd.canvas.width;
+    const targetH = this.rnd.canvas.height;
+    const cam = this.cameras[this.currentCam];
+    const Path = `bin/images/${cam.name}`;
+    
+    try {
+      const response = await fetch(Path);
+      if (!response.ok) {
+        console.error(`Failed to load image: ${Path}`);
+        return;
+      }
+      
+      const blob = await response.blob();
+      if (blob.size === 0) return;
+
+      const imageBitmap = await createImageBitmap(blob, {
+        colorSpaceConversion: 'default',
+        resizeWidth: targetW,
+        resizeHeight: targetH,
+        resizeQuality: 'high'
+      });
+
+      this.rnd.device.queue.copyExternalImageToTexture(
+        { source: imageBitmap },
+        { texture: this.rnd.imageTexture },
+        [imageBitmap.width, imageBitmap.height]
+      );
+      
+      this.rnd.imageTextureView = this.rnd.imageTexture.createView();
+      this.rnd.reload();
+    } catch (error) {
+      console.error(`Error loading image ${Path}:`, error);
+    }
+  }
+
+  prevCamera() {
+    if (!this.camerasLoaded || this.cameras.length === 0) return;
+    this.currentCam--;
+    if (this.currentCam < 0) this.currentCam = this.cameras.length - 1;
+    this.updateCameraDisplay();
+    this.loadCurrentImage();
+  }
+
+  nextCamera() {
+    if (!this.camerasLoaded || this.cameras.length === 0) return;
+    this.currentCam++;
+    if (this.currentCam > this.cameras.length - 1) this.currentCam = 0;
+    this.updateCameraDisplay();
+    this.loadCurrentImage();
+  }
+
+  toggleTraining() {
+    this.isTrainingActive = !this.isTrainingActive;
+    if (this.trainingToggleBtn) {
+      if (this.isTrainingActive) {
+        this.trainingToggleBtn.textContent = 'Stop';
+        this.trainingToggleBtn.style.background = '#ff4444';
+      } else {
+        this.trainingToggleBtn.textContent = 'Train';
+        this.trainingToggleBtn.style.background = '#44aa44';
+      }
+    }
+  }
+
+  toggleAutoTraining() {
+    this.trainingMode = this.trainingMode === 'auto' ? 'manual' : 'auto';
+    if (this.autoTrainBtn) {
+      if (this.trainingMode === 'auto') {
+        this.autoTrainBtn.textContent = 'Auto: ON';
+        this.autoTrainBtn.style.background = '#ff8800';
+        this.autoTrainBtn.style.color = '#000';
+      } else {
+        this.autoTrainBtn.textContent = 'Auto: OFF';
+        this.autoTrainBtn.style.background = '#333333';
+        this.autoTrainBtn.style.color = '#888';
+      }
+    }
+  }
+
+  updateCameraDisplay() {
+    if (this.counterDisplay) {
+      this.counterDisplay.textContent = this.currentCam.toString();
+    }
+  }
+
+  async startRenderLoop() {
+    let iter = 0;
+    
+    const draw = async () => {
+      if (this.isReady) {
+        await this.rnd.start();
+
+        if (this.mode === 'training' && this.isTrainingActive && this.cameras.length > 0) {
+          if (this.trainingMode === 'auto' && iter % 100 === 0) {
+            this.currentCam = Math.floor(Math.random() * this.cameras.length);
+            this.updateCameraDisplay();
+            this.loadCurrentImage();
+          }
+          
+          const cam = this.cameras[this.currentCam];
+          const loc = new vec3(cam.loc[0], cam.loc[1], cam.loc[2]);
+          const at = new vec3(cam.at[0], cam.at[1], cam.at[2]);
+          const up = new vec3(cam.up[0], cam.up[1], cam.up[2]);
+          const target = at.add(loc);
+          this.rnd.controls.cam.set(loc, target, up);
+        }
+
+        await this.rnd.end(this.isTrainingActive && this.mode === 'training');
+      }
+      
+      iter++;
+      window.requestAnimationFrame(draw);
+    };
+    
+    draw();
+  }
+}
 
 const init = async () => {
-  let canvasId = document.querySelector("#webgpu-canvas");
-  let rnd = new render();
-  await rnd.init(canvasId as HTMLElement);
-  let primitives: primitive[] = [];
-  let js = await fetch("./bin/train/gaussians.json");
-  let jscam = await fetch("./bin/train/cam.json");
-  let text = await js.json();
-  let cam = await jscam.json();
-  let curCam = 0;
-
-  let load = async () => {
-    const targetW = rnd.canvas.width;
-    const targetH = rnd.canvas.height;
-
-    const Path = `bin/images/${cam[curCam].name}`;
-    // const Path = `bin/images/true2.png`;
-
-    const response = await fetch(Path);
-    if (!response.ok) {
-      console.error(`Failed to load image: ${Path}, status: ${response.status}`);
-      return;
-    }
-    const blob = await response.blob();
-    if (blob.size === 0) {
-      console.error(`Empty blob for: ${Path}`);
-      return;
-    }
-
-    const imageBitmap = await createImageBitmap(blob, {
-      colorSpaceConversion: 'default',
-    
-      resizeWidth: targetW,
-      resizeHeight: targetH,
-      resizeQuality: 'high' 
-    });
-
-    rnd.device.queue.copyExternalImageToTexture(
-      { source: imageBitmap }, 
-      { texture: rnd.imageTexture },
-      [imageBitmap.width, imageBitmap.height] 
-    );
-    
-    rnd.imageTextureView = rnd.imageTexture.createView();
-    rnd.reload();
-
-  }
-  // const response = await fetch("./bin/scene_data_4.bin");
-  // const arrayBuffer = await response.arrayBuffer();
-  
-  // const floatData = new Float32Array(arrayBuffer);
-  
-  // const stride = 14; 
-  // const numPrimitives = floatData.length / stride;
-  
-  // for (let i = 0; i < numPrimitives; i++) {
-  //   const offset = i * stride;
-    
-  //   const s0 = floatData[offset + 3];
-  //   const s1 = floatData[offset + 4];
-  //   const s2 = floatData[offset + 5];
-
-  //   primitives.push(new primitive(
-  //     new vec3(floatData[offset + 0], floatData[offset + 1], floatData[offset + 2]),
-      
-  //     new vec3(
-  //       s0 > 1.0 ? 1.0 : s0,
-  //       s1 > 1.0 ? 1.0 : s1,
-  //       s2 > 1.0 ? 1.0 : s2
-  //     ),
-      
-  //     new vec4(
-  //       floatData[offset + 6], // X
-  //       floatData[offset + 7], // Y
-  //       floatData[offset + 8], // Z
-  //       floatData[offset + 9]  // W
-  //     ),
-      
-  //     floatData[offset + 10],
-      
-  //     new vec4(
-  //       floatData[offset + 11], // R
-  //       floatData[offset + 12], // G
-  //       floatData[offset + 13], // B
-  //       1.0                     // A
-  //     ),
-  //   ));
-  // }
-
-  for (let i = 0; i < text.length; i++) {
-    primitives.push(new primitive(
-      new vec3(text[i].pos[0], text[i].pos[1], text[i].pos[2]),
-      new vec3(0.02),
-      new vec4(0, 0, 0, 1),
-      0.6,
-      new vec4(text[i].color[0], text[i].color[1], text[i].color[2], text[i].color[3]),
-    ));
-    primitives[i].index = i;
-  }
-  await load();
-
-
-
-    // primitives.push(new primitive(
-    //     new vec3(0),
-    //     new vec3(0.4, 0.2, 0.8),
-    //     new vec4(0, 0, 0, 1),
-    //     0.8,
-    //     new vec4(1, 0, 1, 1),
-    //   ));
-
-    // primitives.push(new primitive(
-    //     new vec3(1),
-    //     new vec3(0.2, 0.5, 0.2),
-    //     new vec4(0, 0, 0, 1),
-    //     0.9,
-    //     new vec4(0, 0, 1, 1),
-    //   ));
-  
-    // True1 png params
-    // primitives.push(new primitive(
-    //     new vec3(0),
-    //     new vec3(0.8, 0.6, 0.4),
-    //     new vec4(0.0, 0.0, 0.6, 1),
-    //     0.8,
-    //     new vec4(1, 0, 1, 1),
-    //   ));
-
-    // True2 png params
-    // primitives.push(new primitive(
-    //     new vec3(0),
-    //     new vec3(0.6, 0.2, 0.2),
-    //     new vec4(0.0, 0.0, 0.7, 1),
-    //     0.8,
-    //     new vec4(1, 0, 1, 1),
-    //   ));
-
-    // primitives.push(new primitive(
-    //     new vec3(1),
-    //     new vec3(0.2, 0.8, 0.2),
-    //     new vec4(0, 0, 0, 1),
-    //     0.9,
-    //     new vec4(0, 0, 1.0, 1),
-    //   ));
-
-    // primitives.push(new primitive(
-    //     new vec3(-1),
-    //     new vec3(0.6, 0.2, 0.1),
-    //     new vec4(0.0, 0.0, 0.7, 1),
-    //     0.8,
-    //     new vec4(1.0, 0, 1, 1),
-    //   ));
-
-    // primitives.push(new primitive(
-    //     new vec3(1),
-    //     new vec3(0.2, 0.8, 0.2),
-    //     new vec4(0, 0, 0.0, 1),
-    //     0.9,
-    //     new vec4(0, 0, 1.0, 1),
-    //   ));
-
-  const prevButton = document.getElementById('prevBtn') as HTMLButtonElement;
-  const nextButton = document.getElementById('nextBtn') as HTMLButtonElement;
-  const valueDisplay = document.getElementById('counterValue') as HTMLSpanElement;
-  const renderButton = document.getElementById('renderBtn') as HTMLButtonElement;
-
-  let updateDisplay = function(): void {
-    if (valueDisplay) {
-      valueDisplay.textContent = curCam.toString();
-    }
-  }
-
-  prevButton?.addEventListener('click', async (): Promise<void> => {
-    curCam--;
-    if (curCam < 0)
-      curCam = cam.length - 1;
-    updateDisplay();
-    load();
-  });
-
-  nextButton?.addEventListener('click', async (): Promise<void> => {
-    curCam++;
-    if (curCam > cam.length - 1)
-      curCam = 0;
-    updateDisplay();
-    load();
-  });
-
-  let flag = true;
-
-  renderButton?.addEventListener('click', async (): Promise<void> => {
-    flag = !flag;
-  });
-
-  rnd.attachToDraw(primitives);
-
-  let iter = 0;
-  
-  const draw = async () => {
-    rnd.start();
-    // primitives[0].rotation = new vec4(Math.sin(timer.time), 0, 0, 1);
-
-    // primitives.push(new primitive(
-    //     new vec3(1),
-    //     new vec3(0.2, 0.2, 0.2),
-    //     new vec4(0, 0, 0, 1),
-    //     0.9,
-    //     new vec4(0, 0, 1.0, 1),
-    //   ));
-    // if (iter % 100 == 0) {
-    // {
-    //   curCam = Math.floor(Math.random() * cam.length);
-    //   if (curCam >= cam.length)
-    //     curCam = cam.length - 1;
-    //   await load();
-    // }
-
-
-    if (flag && cam.length > 0)
-    {
-      let loc = new vec3(cam[curCam].loc[0], cam[curCam].loc[1], cam[curCam].loc[2]);
-      let at = new vec3(cam[curCam].at[0], cam[curCam].at[1], cam[curCam].at[2]);
-      let up = new vec3(cam[curCam].up[0], cam[curCam].up[1], cam[curCam].up[2]);
-      let target = at.add(loc);
-      rnd.controls.cam.set(loc, target, up);
-    }
-
-    await rnd.end(flag);  
-    iter++;
-    // if (iter > 4500)
-    // {
-    //   iter = 0;
-    //   rnd.IterationsCount = 1;
-    //   curCam++;
-    // }
-    //rnd.primsClear();
-    window.requestAnimationFrame(draw);
-  };
-  draw();
+  const viewer = new GaussianViewer();
+  await viewer.init();
 };
 
 init();

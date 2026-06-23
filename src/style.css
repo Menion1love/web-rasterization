@@ -1,207 +1,175 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
 body, html, #root {
   width: 100%;
   height: 100vh;
   overflow: hidden;
-  background: var(--app-bg, #1a1a1a);
+  background: #1a1a2e;
+  font-family: 'Courier New', monospace;
+}
+
+#app-container {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 20px;
+  gap: 0;
 }
 
 #webgpu-canvas {
   width: 1024px;
   height: 768px;
   display: block;
-}
-@import url('https://googleapis.com');
-
-.mega-render-btn {
-  position: relative;
-  padding: 16px 36px;
-  font-family: 'Orbitron', sans-serif;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 3px;
-  color: #ffffff;
-  background: #111116; /* Глубокий темный фон */
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  cursor: pointer;
-  outline: none;
-  overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
 }
 
-/* Плавный переливающийся задний фон (неоновая рамка) */
-.mega-render-btn::before {
-  content: '';
-  position: absolute;
-  top: -2px; left: -2px; right: -2px; bottom: -2px;
-  z-index: -1;
-  background: linear-gradient(45deg, #ff0055, #00ffcc, #0055ff, #ff0055);
-  background-size: 300% 300%;
-  border-radius: 9px;
-  opacity: 0.4;
-  transition: opacity 0.3s ease;
-  animation: smoothNeon 4s ease infinite;
-}
-
-/* Аккуратное неоновое свечение под кнопкой */
-.mega-render-btn::after {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  z-index: -2;
-  background: linear-gradient(45deg, #ff0055, #00ffcc, #0055ff, #ff0055);
-  background-size: 300% 300%;
-  filter: blur(15px);
-  opacity: 0;
-  transition: opacity 0.3s ease, transform 0.3s ease;
-  animation: smoothNeon 4s ease infinite;
-}
-
-/* Эффекты при наведении */
-.mega-render-btn:hover {
-  transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.3);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
-}
-
-/* Рамка становится ярче при наведении */
-.mega-render-btn:hover::before {
-  opacity: 1;
-}
-
-/* Включается мягкое свечение под кнопкой */
-.mega-render-btn:hover::after {
-  opacity: 0.6;
-  transform: scale(1.05);
-}
-
-/* Эффект при клике */
-.mega-render-btn:active {
-  transform: translateY(1px);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
-}
-
-/* Статичный аккуратный текст */
-.mega-render-btn span {
-  position: relative;
-  z-index: 2;
-  text-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
-}
-
-/* Анимация плавного перелива цветов */
-@keyframes smoothNeon {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-/* Общий контейнер для элементов (если у вас его нет, добавьте в HTML) */
-.controls-container {
+#sidebar {
+  width: 280px;
+  height: 768px;
+  background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
+  border: 1px solid #533483;
+  border-left: none;
+  border-radius: 0 12px 12px 0;
+  padding: 20px;
+  box-shadow: 4px 8px 32px rgba(83, 52, 131, 0.3);
   display: flex;
-  align-items: center;
-  gap: 12px;
-  background-color: #1e1e24; /* Мягкий темный фон панели */
-  padding: 10px 16px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  width: fit-content;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-/* Стили для стрелочек "Назад" и "Вперед" */
-.arrow-btn {
-  display: inline-flex;
-  align-items: center;
+  flex-direction: column;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  background-color: #2b2b36; /* Чуть светлее фона панели */
-  color: #a0a0b0; /* Спокойный приглушенный цвет текста */
-  border: 1px solid rgba(255, 255, 255, 0.03);
-  border-radius: 6px;
-  font-size: 18px;
+  flex-shrink: 0;
+}
+
+#sidebar div {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#sidebar button {
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #1a1a3e 0%, #2a1a4e 100%);
+  color: #e0d0ff;
+  border: 1px solid #533483;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
   cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-/* Ховер для стрелочек */
-.arrow-btn:hover {
-  background-color: #383847;
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.1);
-}
-
-/* Клик по стрелочкам */
-.arrow-btn:active {
-  transform: scale(0.95);
-  background-color: #23232c;
-}
-
-/* Значение счетчика посередине */
-#counterValue {
-  font-size: 16px;
-  font-weight: 600;
-  color: #ffffff;
-  min-width: 30px; /* Чтобы текст не прыгал при смене 9 на 10 */
-  text-align: center;
-  user-select: none;
-}
-
-/* Версия кнопки RENDER SCREEN (адаптированная, чтобы не выбиваться) */
-.mega-render-btn {
-  position: relative;
-  height: 38px; /* Выравниваем высоту со стрелочками */
-  padding: 0 20px;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
+  transition: all 0.3s;
+  text-align: left;
+  width: 100%;
   letter-spacing: 1px;
+}
+
+#sidebar button:hover {
+  background: linear-gradient(135deg, #2a2a5e 0%, #3a2a6e 100%);
+  border-color: #7b5ea7;
   color: #ffffff;
-  background: #111116; 
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
+  box-shadow: 0 4px 15px rgba(123, 94, 167, 0.3);
+  transform: translateX(-2px);
+}
+
+#menuBackPoints, #menuBackCameras {
+  background: linear-gradient(135deg, #4a1a2a 0%, #5a2a3a 100%);
+  border-color: #834453;
+  color: #ffb8c8;
+  width: auto;
+}
+
+#menuBackPoints:hover, #menuBackCameras:hover {
+  background: linear-gradient(135deg, #5a2a3a 0%, #6a3a4a 100%);
+  border-color: #a35668;
+  box-shadow: 0 4px 15px rgba(163, 86, 104, 0.3);
+}
+
+#loadPointsBtn, #loadCamerasBtn {
+  background: linear-gradient(135deg, #1a3a2a 0%, #1a4a3a 100%);
+  border-color: #538360;
+  color: #b8ffe0;
+}
+
+#loadPointsBtn:hover, #loadCamerasBtn:hover {
+  background: linear-gradient(135deg, #2a4a3a 0%, #2a5a4a 100%);
+  border-color: #6ba380;
+  box-shadow: 0 4px 15px rgba(107, 163, 128, 0.3);
+}
+
+#trainingControls {
+  position: fixed;
+  bottom: 30px;
+  left: 20px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  z-index: 10;
+  background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
+  padding: 14px 24px;
+  border-radius: 12px;
+  border: 1px solid #533483;
+  box-shadow: 0 8px 32px rgba(83, 52, 131, 0.3);
+}
+
+#trainingControls button {
+  padding: 10px 18px;
+  background: linear-gradient(135deg, #2a1a4e 0%, #3a2a5e 100%);
+  color: #d0c0ff;
+  border: 1px solid #634493;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
   cursor: pointer;
-  outline: none;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: all 0.3s;
+  letter-spacing: 1px;
 }
 
-/* Плавная неоновая рамка (теперь активируется ТОЛЬКО при наведении) */
-.mega-render-btn::before {
-  content: '';
-  position: absolute;
-  top: -1px; left: -1px; right: -1px; bottom: -1px;
-  z-index: -1;
-  background: linear-gradient(45deg, #ff0055, #00ffcc, #0055ff, #ff0055);
-  background-size: 300% 300%;
-  border-radius: 7px;
-  opacity: 0; /* В покое рамка скрыта */
-  transition: opacity 0.2s ease;
-  animation: smoothNeon 4s linear infinite;
+#trainingControls button:hover {
+  background: linear-gradient(135deg, #3a2a6e 0%, #4a3a7e 100%);
+  border-color: #8b6ab7;
+  box-shadow: 0 4px 15px rgba(139, 106, 183, 0.3);
+  transform: translateY(-1px);
 }
 
-.mega-render-btn:hover {
-  border-color: transparent;
-  box-shadow: 0 4px 12px rgba(0, 255, 204, 0.15);
+#counterValue {
+  color: #b8a8e0;
+  font-size: 18px;
+  min-width: 40px;
+  text-align: center;
+  font-weight: bold;
+  text-shadow: 0 0 10px rgba(184, 168, 224, 0.3);
 }
 
-/* Рамка мягко проявляется при наведении */
-.mega-render-btn:hover::before {
-  opacity: 1;
+#trainingToggleBtn {
+  background: linear-gradient(135deg, #1a3a2a 0%, #1a4a3a 100%) !important;
+  border-color: #538360 !important;
+  color: #b8ffe0 !important;
 }
 
-.mega-render-btn:active {
-  transform: scale(0.98);
+#trainingToggleBtn:hover {
+  background: linear-gradient(135deg, #2a5a3a 0%, #2a6a4a 100%) !important;
+  border-color: #6ba380 !important;
 }
 
-.mega-render-btn span {
-  position: relative;
-  z-index: 2;
+#autoTrainBtn {
+  background: linear-gradient(135deg, #3a2a1a 0%, #4a3a2a 100%) !important;
+  border-color: #836053 !important;
+  color: #ffe0c0 !important;
 }
 
-@keyframes smoothNeon {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+#autoTrainBtn:hover {
+  background: linear-gradient(135deg, #4a3a2a 0%, #5a4a3a 100%) !important;
+  border-color: #a3806b !important;
+}
+#menuClean {
+  background: linear-gradient(135deg, #4a1a1a 0%, #5a2a2a 100%) !important;
+  border-color: #834444 !important;
+  color: #ffb8b8 !important;
+  margin-top: 10px;
+}
+
+#menuClean:hover {
+  background: linear-gradient(135deg, #5a2a2a 0%, #6a3a3a 100%) !important;
+  border-color: #a35656 !important;
+  box-shadow: 0 4px 15px rgba(163, 86, 86, 0.3) !important;
 }
