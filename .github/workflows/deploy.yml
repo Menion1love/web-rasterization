@@ -1,8 +1,8 @@
-aname: Deploy Vite Site to GitHub Pages
+name: Deploy Vite Site to GitHub Pages
 
 on:
   push:
-    branches: [main] 
+    branches: [main, master]
 
 permissions:
   contents: read
@@ -17,7 +17,7 @@ jobs:
   deploy:
     environment:
       name: github-pages
-      url: ${{ steps: deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
