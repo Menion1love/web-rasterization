@@ -1,44 +1,60 @@
 <!doctype html>
-// God bless
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>rasterization</title>
+    <title>Gaussian Rasterization</title>
   </head>
   <body>
     <div id="app">
-      <div id="app-container">
-        <canvas id="webgpu-canvas"></canvas>
-        
-        <div id="sidebar">
-          <div id="mainMenu">
-            <button id="menuLoadPoints">Load Points</button>
-            <button id="menuLoadCameras">Load Cameras</button>
-            <button id="menuClean" style="display: none;">Clean</button>
-          </div>
-          
-          <div id="pointsMenu" style="display: none;">
-            <button id="menuBackPoints">Back</button>
-            <button id="loadPointsBtn">Choose .json or .bin</button>
-            <input type="file" id="pointsFileInput" accept=".json,.bin" style="display: none;">
-          </div>
-          
-          <div id="camerasMenu" style="display: none;">
-            <button id="menuBackCameras">Back</button>
-            <button id="loadCamerasBtn">Choose cameras.json</button>
-            <input type="file" id="camerasFileInput" accept=".json" style="display: none;">
-          </div>
+      <div id="workspace">
+        <div id="viewport">
+          <canvas id="webgpu-canvas"></canvas>
         </div>
-      </div>
 
-      <div id="trainingControls" style="display: none;">
-        <button id="prevBtn">Prev</button>
-        <span id="counterValue">0</span>
-        <button id="nextBtn">Next</button>
-        <button id="trainingToggleBtn">Train</button>
-        <button id="autoTrainBtn">Auto: OFF</button>
+        <aside id="sidebar">
+          <div id="sidebarHeader">
+            <span id="sidebarTitle">Gaussian Raster</span>
+            <span id="phaseBadge">idle</span>
+          </div>
+
+          <section class="panel-section">
+            <h2 class="panel-label">Scene</h2>
+            <div id="loadPanel" class="btn-stack">
+              <button id="loadPointsBtn" type="button" class="btn btn-load">Load points</button>
+              <button id="loadCamerasBtn" type="button" class="btn btn-load" disabled>Load cameras</button>
+              <button id="resetSceneBtn" type="button" class="btn btn-danger">Reset scene</button>
+              <input type="file" id="pointsFileInput" accept=".json,.bin" hidden />
+              <input type="file" id="camerasFileInput" accept=".json" hidden />
+            </div>
+            <div id="assetState">
+              <div class="asset-row">
+                <span class="asset-dot" id="pointsDot"></span>
+                <span id="pointsState">Points not loaded</span>
+              </div>
+              <div class="asset-row">
+                <span class="asset-dot" id="camerasDot"></span>
+                <span id="camerasState">Cameras not loaded</span>
+              </div>
+            </div>
+          </section>
+
+          <p id="statusBar">Initializing WebGPU...</p>
+
+          <section id="trainingControls" class="panel-section">
+            <h2 class="panel-label">Training</h2>
+            <div class="camera-nav">
+              <button id="prevBtn" type="button" class="btn btn-ghost">Prev</button>
+              <span id="counterValue">—</span>
+              <button id="nextBtn" type="button" class="btn btn-ghost">Next</button>
+            </div>
+            <div class="btn-stack">
+              <button id="trainingToggleBtn" type="button" class="btn btn-train">Train</button>
+              <button id="autoTrainBtn" type="button" class="btn btn-auto">Auto: OFF</button>
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

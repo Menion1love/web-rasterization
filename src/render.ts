@@ -85,7 +85,8 @@ class render extends core
   private stagingBuffer!: buffer;
   private stagingBuffer2!: buffer;
   private cameraBuffer!: buffer;
-  private cameraData!: Float32Array;
+  private cameraData: Float32Array | undefined;
+  private static readonly CAMERA_UNIFORM_FLOATS = 16 * 3 + 4 * 5;
 
   private transmittanceTexture!: GPUTexture | null;
   private transmittanceTextureView!: GPUTextureView | null;
@@ -118,8 +119,12 @@ class render extends core
   private warmupIters = 200;
   private densifyInterval = 100;
   private stopDensifyIter = 15000;
+  private gradThreshold = 0.003;
+  private scaleThreshold = 0.01;
+  private opacityThreshold = 0.05;
   private gaussainsCount = 0;
   private FrameID = 0;
+  private renderingEnabled = false;
 
   /**
    * @info Calculate capacity function
@@ -657,7 +662,15 @@ class render extends core
       workgroup_size: { x: 16, y: 16 },
     })
 
+    this.renderingEnabled = true;
+    this.ensureCameraData();
   } /** End of 'constructor' function */
+
+  private ensureCameraData() {
+    if (!this.cameraData || this.cameraData.length < render.CAMERA_UNIFORM_FLOATS) {
+      this.cameraData = new Float32Array(render.CAMERA_UNIFORM_FLOATS);
+    }
+  }
 
   public reload()
   {
@@ -725,6 +738,7 @@ class render extends core
    * @returns None.
    */
   public start() {
+    if (!this.renderingEnabled) return;
     this.commandEncoder = this.device.createCommandEncoder();
     this.controls.response();
     timer.response();
@@ -741,6 +755,40 @@ class render extends core
 
   public async primsClear() {
     this.primitives = [];
+    this.gaussainsCount = 0;
+  }
+
+  public applyTrainingConfig(config: {
+    warmupIters: number;
+    densifyInterval: number;
+    stopDensifyIter: number;
+    gradThreshold: number;
+    scaleThreshold: number;
+    opacityThreshold: number;
+  }) {
+    this.warmupIters = config.warmupIters;
+    this.densifyInterval = config.densifyInterval;
+    this.stopDensifyIter = config.stopDensifyIter;
+    this.gradThreshold = config.gradThreshold;
+    this.scaleThreshold = config.scaleThreshold;
+    this.opacityThreshold = config.opacityThreshold;
+  }
+
+  /**
+   * @info Replace scene primitives and upload them to GPU buffers
+   * @param primitive[] : array of primitives to draw
+   * @returns None.
+   */
+  public async loadScene(prims: primitive[]) {
+    this.primitives = [];
+    this.gaussainsCount = 0;
+    this.IterationsCount = 1;
+
+    for (let i = 0; i < prims.length; i++) {
+      this.draw(prims[i]);
+    }
+
+    await this.uploadSceneBuffers();
   }
 
   /**
@@ -749,10 +797,10 @@ class render extends core
    * @returns None.
    */
   public async attachToDraw(prims: primitive[]) {
-    for (let i = 0; i < prims.length; i++)
-      this.draw(prims[i]);
+    await this.loadScene(prims);
+  }
 
-    // Collect data
+  private async uploadSceneBuffers() {
     const gaussians = this.primitives.map(p => ({
       position: p.position,
       scale: p.scale,
@@ -761,7 +809,7 @@ class render extends core
       opacity: p.opacity,
       index: p.index
     }));
-    this.gaussainsCount += prims.length;
+    this.gaussainsCount = this.primitives.length;
     const len = this.calcCapacity(this.primitives.length);
     
     const totalBufferSize = len * 16 * 4;
@@ -1036,33 +1084,33 @@ class render extends core
     if (this.primitives.length == 0 || !this.commandEncoder) 
       return;
     
-    if (!this.cameraData) 
-      this.cameraData = new Float32Array(64 + 64 + 64 + 16 * 5);
+    this.ensureCameraData();
+    const cameraData = this.cameraData!;
 
     let offset = 0;
-    this.cameraData.set(this.controls.cam.view.m.flat(), offset); offset += 16;
-    this.cameraData.set(this.controls.cam.proj.m.flat(), offset); offset += 16;
-    this.cameraData.set(this.controls.cam.vp.m.flat(), offset); offset += 16;
-    this.cameraData.set([this.controls.cam.loc.x, this.controls.cam.loc.y, this.controls.cam.loc.z, this.controls.cam.frameW], offset); offset += 4;
-    this.cameraData.set([this.controls.cam.at.x, this.controls.cam.at.y, this.controls.cam.at.z, this.controls.cam.frameH], offset); offset += 4;
-    this.cameraData.set([this.controls.cam.dir.x, this.controls.cam.dir.y, this.controls.cam.dir.z, this.controls.cam.projDist], offset); offset += 4;
-    this.cameraData.set([this.controls.cam.right.x, this.controls.cam.right.y, this.controls.cam.right.z, this.controls.cam.wp], offset); offset += 4;
-    this.cameraData.set([this.controls.cam.up.x, this.controls.cam.up.y, this.controls.cam.up.z, this.controls.cam.hp], offset);
+    cameraData.set(this.controls.cam.view.m.flat(), offset); offset += 16;
+    cameraData.set(this.controls.cam.proj.m.flat(), offset); offset += 16;
+    cameraData.set(this.controls.cam.vp.m.flat(), offset); offset += 16;
+    cameraData.set([this.controls.cam.loc.x, this.controls.cam.loc.y, this.controls.cam.loc.z, this.controls.cam.frameW], offset); offset += 4;
+    cameraData.set([this.controls.cam.at.x, this.controls.cam.at.y, this.controls.cam.at.z, this.controls.cam.frameH], offset); offset += 4;
+    cameraData.set([this.controls.cam.dir.x, this.controls.cam.dir.y, this.controls.cam.dir.z, this.controls.cam.projDist], offset); offset += 4;
+    cameraData.set([this.controls.cam.right.x, this.controls.cam.right.y, this.controls.cam.right.z, this.controls.cam.wp], offset); offset += 4;
+    cameraData.set([this.controls.cam.up.x, this.controls.cam.up.y, this.controls.cam.up.z, this.controls.cam.hp], offset);
       
     const arrayBuffer = new ArrayBuffer(48);
     const floatView = new Float32Array(arrayBuffer);
     const uintView = new Uint32Array(arrayBuffer);
     const caplen = this.inputBuffer.bufferDesriptor.size / 4;
     
-    floatView[0] = 0.003;
-    floatView[1] = 0.01;
-    floatView[2] = 0.05; 
+    floatView[0] = this.gradThreshold;
+    floatView[1] = this.scaleThreshold;
+    floatView[2] = this.opacityThreshold;
     uintView[3] = caplen;
     uintView[4] = this.IterationsCount;
 
     await this.denistyParamsBuffer.updateArray(arrayBuffer);
 
-    await this.cameraBuffer.update(this.cameraData);
+    await this.cameraBuffer.update(cameraData);
     await this.counterBuffer.updateInteger(new Uint32Array([0]));
     await this.iteratorBuffer.updateInteger(new Uint32Array([this.IterationsCount]));
     await this.freeSlotBuffer.updateInteger(new Uint32Array([this.gaussainsCount]));
@@ -1347,7 +1395,14 @@ class render extends core
    * @returns None.
    */
   public async end(flag: boolean) {
-    if (!this.commandEncoder) return;
+    if (!this.commandEncoder || !this.renderingEnabled) {
+      this.commandEncoder = null;
+      return;
+    }
+    if (!this.renderTextureView || !this.gradientTextureView || !this.displayPipeline) {
+      this.commandEncoder = null;
+      return;
+    }
     this.FrameID++;
 
     const clearPassDescriptor: GPURenderPassDescriptor = {
@@ -1662,8 +1717,13 @@ class render extends core
   } /** End of 'end' function */
 
   public async cleanup() {
+    this.renderingEnabled = false;
+
     // Wait for any pending GPU operations
     await this.device.queue.onSubmittedWorkDone();
+    this.commandEncoder = null;
+    this.passEncoder = null;
+    this.computePassEncoder = null;
 
     // Destroy all textures
     if (this.renderTexture) {
@@ -1729,7 +1789,7 @@ class render extends core
     this.IterationsCount = 1;
     this.FrameID = 0;
     this.denFlag = false;
-    this.cameraData = new Float32Array(0);
+    this.cameraData = undefined;
 
     // Nullify all bind groups
     this.bindGroup = null as any;
