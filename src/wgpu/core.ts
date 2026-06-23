@@ -38,7 +38,9 @@ class core
     }
 
     // get adapter
-    const adapter = await navigator.gpu.requestAdapter();
+    const adapter = await navigator.gpu.requestAdapter({
+        powerPreference: "high-performance"
+    });
     if (!adapter) {
       throw Error("No GPU adapter found");
     }
