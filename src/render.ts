@@ -295,7 +295,7 @@ class render extends core
       size: 4,
     })
 
-    const shaderModule = await this.loadShaderModule("src/shaders/forward/comp.wgsl");
+    const shaderModule = await this.loadShaderModule("shaders/forward/comp.wgsl");
     
     this.computePipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -324,7 +324,7 @@ class render extends core
       ]
     });
 
-    const tileShaderModule = await this.loadShaderModule("src/shaders/forward/tailer.wgsl");
+    const tileShaderModule = await this.loadShaderModule("shaders/forward/tailer.wgsl");
 
     this.tilePipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -349,7 +349,7 @@ class render extends core
       ]
     });
 
-    const keysShaderModule = await this.loadShaderModule("src/shaders/forward/keys.wgsl");
+    const keysShaderModule = await this.loadShaderModule("shaders/forward/keys.wgsl");
 
     this.keysPipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -382,7 +382,7 @@ class render extends core
       ]
     });
 
-    const rasterShaderModule = await this.loadShaderModule("src/shaders/forward/raster.wgsl");
+    const rasterShaderModule = await this.loadShaderModule("shaders/forward/raster.wgsl");
 
     this.rasterPipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -419,7 +419,7 @@ class render extends core
       ]
     });
 
-    const gradientShaderModule = await this.loadShaderModule("src/shaders/learn/gradient.wgsl");
+    const gradientShaderModule = await this.loadShaderModule("shaders/learn/gradient.wgsl");
 
     this.gradientPipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -444,7 +444,7 @@ class render extends core
       ]
     });
     
-    const backwardShaderModule = await this.loadShaderModule("src/shaders/learn/backward.wgsl");
+    const backwardShaderModule = await this.loadShaderModule("shaders/learn/backward.wgsl");
 
     this.backwardPipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -489,7 +489,7 @@ class render extends core
       ]
     });
 
-    const learnShaderModule = await this.loadShaderModule("src/shaders/learn/learner.wgsl");
+    const learnShaderModule = await this.loadShaderModule("shaders/learn/learner.wgsl");
 
     this.learnPipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -526,7 +526,7 @@ class render extends core
       ]
     });
 
-    const denClearShaderModule = await this.loadShaderModule("src/shaders/learn/clear_density.wgsl");
+    const denClearShaderModule = await this.loadShaderModule("shaders/learn/clear_density.wgsl");
 
     this.denistyclearPipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -543,7 +543,7 @@ class render extends core
       ]
     });
 
-    const denCtrlShaderModule = await this.loadShaderModule("src/shaders/learn/density_control.wgsl");
+    const denCtrlShaderModule = await this.loadShaderModule("shaders/learn/density_control.wgsl");
 
     this.denistyctrlPipeline = this.device.createComputePipeline({
       layout: 'auto',
@@ -584,7 +584,7 @@ class render extends core
       ]
     });
 
-    const displayShaderModule = await this.loadShaderModule("src/shaders/display/display.wgsl");
+    const displayShaderModule = await this.loadShaderModule("shaders/display/display.wgsl");
 
     const sampler = this.device.createSampler({
       magFilter: 'nearest', 
